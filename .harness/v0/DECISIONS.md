@@ -174,3 +174,27 @@ loops, branches, or re-derives state. Key semantics:
   created by env; that belongs to init/doctor when opt-in mode is on).
 - Real-shell eval smoke (bash+zsh, quote-bearing values) verified manually
   this iteration; the scripted-shell integration suite remains its own task.
+
+## D017 — 2026-06-10 — zsh hook contract + test-binary impersonation (T09)
+`agentmod hook zsh` prints a self-contained script (internal/shellhook); rc
+editing stays T08. Beyond D007/D016, the script decides:
+- **Failed-root cache**: a root whose `env --activate` failed (broken config)
+  is remembered in `_AGENTMOD_FAILED_ROOT` (typeset -g, NOT exported) and not
+  retried while standing in it — one stderr error, not per-prompt spam.
+  Leaving the project clears the cache, so re-entering retries (the fix-it
+  path). After a failed switch A→broken-B the hook explicitly deactivates A:
+  routing is only ever active for the project whose config actually loaded.
+- **Missing binary**: warn once per shell (`_AGENTMOD_MISSING_WARNED`), then
+  silently no-op; binary lookup happens only on transitions (whence -p).
+- Functions use `emulate -L zsh`; registration appends to
+  precmd_functions/chpwd_functions with an `(I)` dedup guard, so double-eval
+  registers once. `print -r --`, quoted comparisons throughout.
+- **Tests run a real zsh** (`zsh -f`, skipped if zsh absent) with the TEST
+  BINARY impersonating agentmod: TestMain dispatches to cli.Run when
+  AGENTMOD_TEST_RUN_MAIN=1, and a `#!/bin/sh` wrapper named `agentmod` on the
+  child's PATH sets that var — no go-build at test time, no real install.
+  Child env is fully explicit (throwaway HOME in the CHILD only). precmd is
+  exercised via `zsh -f -i` with piped stdin (precmd fires before each
+  prompt). Gotcha: zsh resolves its STARTING directory physically
+  (/var→/private/var on macOS), so the precmd test compares against
+  filepath.EvalSymlinks; `cd` keeps the logical path, matching D011.

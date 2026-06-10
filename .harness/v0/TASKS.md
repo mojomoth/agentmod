@@ -25,7 +25,7 @@ Add/split items freely; keep units small.
 - [x] init: idempotency guarantee tests (run twice, byte-identical results)
 - [x] init: flags --no-shell-hook, --yes/non-interactive (+ tests)
 - [x] `agentmod env` activate/deactivate/switch transition logic (+ tests)
-- [ ] `agentmod hook zsh` emitter: precmd/chpwd, pure-shell upward search, evals env on transitions (+ tests)
+- [x] `agentmod hook zsh` emitter: precmd/chpwd, pure-shell upward search, evals env on transitions (+ tests)
 - [ ] `agentmod hook bash` (+ tests)
 - [ ] rc fenced-block insert/update, never duplicate, never touch user content (+ tests)
 - [ ] scripted-shell integration tests: activate/deactivate/cross-project, PATH dedup, HOME untouched

@@ -15,12 +15,12 @@ only when its rows are all ✅ in the Status column. Update Status as tests land
 | T07 | .gitignore | created if missing; entry deduped; non-git dir handled gracefully | ✅ |
 | T08 | rc fencing | block inserted once; no dup block on re-init (T05 slice); updated in place; user content byte-preserved around it | ⬜ |
 | T09a | env transitions | `agentmod env`: activate emits routed vars + saves pre-existing values; deactivate restores/unsets (perfect-inverse round-trip); switch undoes old project before new; PATH prepend deduped + stripped; disabled agents/XDG opt-in respected; quoting safe (real bash+zsh eval smoke); failures keep stdout empty; AGENTMOD_VARS names sanitized | ✅ |
-| T09 | zsh hook | scripted zsh: cd in → vars set; cd out → vars unset; new shell inside project activates (precmd); nested project nearest-wins | ⬜ |
+| T09 | zsh hook | scripted zsh: cd in → vars set; cd out → vars unset; new shell inside project activates (precmd); nested project nearest-wins | ✅ also: missing-binary warn-once, broken-config error-once + old-project deactivate, double-eval single registration, zsh -n syntax gate |
 | T10 | bash hook | same via PROMPT_COMMAND | ⬜ |
 | T11 | env hygiene | no duplicate PATH entries after repeated transitions; prior user env values restored; HOME never changed; no shims created anywhere | ⬜ |
-| T12 | Claude routing | CLAUDE_CONFIG_DIR → .agentmod/claude inside; unset/restored outside | 🟡 env-level done (T09a); hook-level pending T09 |
-| T13 | Codex routing | CODEX_HOME → .agentmod/codex inside; unset/restored outside | 🟡 env-level done (T09a); hook-level pending T09 |
-| T14 | OpenCode routing | partial: OPENCODE_CONFIG set, XDG untouched; opt-in: XDG_CONFIG_HOME/XDG_DATA_HOME set; off by default | 🟡 env-level done (T09a); hook-level pending T09 |
+| T12 | Claude routing | CLAUDE_CONFIG_DIR → .agentmod/claude inside; unset/restored outside | ✅ env (T09a) + real-zsh hook (T09); scenario re-check in T30 |
+| T13 | Codex routing | CODEX_HOME → .agentmod/codex inside; unset/restored outside | ✅ env (T09a) + real-zsh hook (T09); scenario re-check in T30 |
+| T14 | OpenCode routing | partial: OPENCODE_CONFIG set, XDG untouched; opt-in: XDG_CONFIG_HOME/XDG_DATA_HOME set; off by default | ✅ partial mode env+zsh-hook (XDG1:unset asserted); XDG opt-in env-level (T09a); scenario re-check in T30 |
 | T15 | Auth bootstrap | consent→copy (codex auth.json; claude .credentials.json linux path); decline→instructions; non-interactive→never copies; copied files in exclusion list | ⬜ |
 | T16 | guard claude-bash | blocks rm/cp/mv/mkdir/clone/redirect into global homes; allows reads; allows project writes; unparseable input fail-safe (denies only global-path writes); exit-2 + deny-JSON modes | ⬜ |
 | T17 | guard wiring | init writes PreToolUse hook into .agentmod/claude/settings.json, NOT project .claude/ | ⬜ |

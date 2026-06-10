@@ -1,10 +1,10 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-10 (iteration: Phase 2 task 5a — `agentmod env` transitions, T09a)
+Last updated: 2026-06-10 (iteration: Phase 2 — `agentmod hook zsh`, T09)
 
 ## Where things stand
-- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 items 1–4 LANDED
-  + the env half of item 5.
+- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 items 1–5 LANDED
+  + the zsh half of item 6 (bash hook is next).
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -102,6 +102,26 @@ Last updated: 2026-06-10 (iteration: Phase 2 task 5a — `agentmod env` transiti
     node/bin, the one managed PATH entry), NPM_CONFIG_CACHE=node/npm-cache,
     PNPM_HOME=node/pnpm, BUN_INSTALL=node/bun. pnpm/bun global bins are NOT
     on PATH in MVP — list under README limitations (Phase 8).
+- `agentmod hook zsh` LANDED and green (T09 ✅, D017): new
+  `internal/shellhook` package (`Zsh()` returns the script) +
+  `internal/cli/hook.go` (runHook; zsh supported, bash → "not implemented
+  yet", others rejected). Wired into dispatcher + usage. Script: pure-zsh
+  `_agentmod_find_root` upward walk, `_agentmod_hook` on precmd+chpwd
+  (dedup-guarded registration), transitions eval `agentmod env`; failed-root
+  cache + A→broken-B fallback deactivate + missing-binary warn-once — full
+  contract in D017 (read it AND D016 before touching hook/env code).
+  - 9 test funcs in hook_test.go: command table, script-content anchors,
+    `zsh -n` syntax gate, cd-in/out (vars+PATH set/restored, HOME untouched,
+    OPENCODE_CONFIG set, XDG unset in partial mode), nested nearest-wins,
+    precmd new-shell activation (interactive zsh), missing-binary warn-once,
+    broken-config error-once + old-project deactivation, double-eval
+    single-registration. All run a REAL `zsh -f` (t.Skip if absent) with the
+    test binary impersonating agentmod via a TestMain dispatch on
+    AGENTMOD_TEST_RUN_MAIN=1 + a /bin/sh wrapper on the child PATH — reuse
+    this harness for the bash hook (T10) and integration tests (T11).
+  - macOS gotcha (cost one red run): zsh resolves its STARTING dir physically
+    (/var→/private/var), so start-inside-project assertions need
+    filepath.EvalSymlinks; plain `cd` keeps the logical path.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -134,22 +154,23 @@ mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 2: `agentmod hook zsh` emitter (TASKS.md Phase 2; FABLE_PLAN §14,
-IMPLEMENTATION_PLAN §7, D007, D016). The env half is DONE — the hook
-only has to: (1) define a pure-zsh upward search for
-`.agentmod/agentmod.toml` (no binary exec on the hot path), (2) on
-precmd+chpwd detect transitions by comparing the found root against
-$AGENTMOD_PROJECT_ROOT, (3) on transition eval
-`agentmod env --shell zsh --activate <root>` / `--deactivate`
-(switching needs only --activate — env self-deactivates first, D016),
-(4) no-op with a one-time warning if the agentmod binary is missing.
-`agentmod hook zsh` PRINTS the script to stdout; rc-file editing stays
-T08. Test via scripted child zsh processes: `zsh -f` (skips user rc
-files — never touch the real ones), built test binary prepended to the
-child's PATH, script = eval "$(agentmod hook zsh)" + cd sequences +
-env assertions; the child process env may carry a temp HOME but the
-parent test process must never reassign the real HOME. bash
-(PROMPT_COMMAND) is the item after.
+Phase 2: `agentmod hook bash` (T10; TASKS.md Phase 2; FABLE_PLAN §14,
+IMPLEMENTATION_PLAN §7, D007, D016, D017). Mirror the zsh hook in
+internal/shellhook: same find-root walk and transition logic but in
+portable bash — register via PROMPT_COMMAND (append with dedup guard;
+bash has no chpwd, PROMPT_COMMAND alone covers both cd and new-shell
+since it runs before every prompt), `command -v` instead of
+`whence -p`, `${dir%/*}` instead of `${dir:h}` (careful: "" after
+stripping the last component means "/"), no emulate. runHook already
+has the "bash" case stubbed — replace the not-implemented error with
+shellhook.Bash(). Tests: reuse hook_test.go's harness (fakeAgentmodBin
++ childEnv + a runBash twin of runZsh; `bash --norc --noprofile`,
+PROMPT_COMMAND fires only in interactive mode `-i`, so either run
+interactive like the precmd test or invoke the hook function directly
+after cd in non-interactive scripts). Port the same scenario set:
+cd in/out, nested nearest-wins, new-shell-inside-project, warn-once,
+broken-config-once, double-eval registration. macOS ships bash 3.2 —
+no associative arrays, no ${var,,}; keep the script bash-3.2-clean.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

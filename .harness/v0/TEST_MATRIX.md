@@ -6,7 +6,7 @@ only when its rows are all ✅ in the Status column. Update Status as tests land
 
 | # | Area | Must cover | Status |
 |---|------|-----------|--------|
-| T01 | Project discovery | found in cwd; found in ancestor; nearest-wins with nested projects; not found; stops at filesystem root | ⬜ |
+| T01 | Project discovery | found in cwd; found in ancestor; nearest-wins with nested projects; not found; stops at filesystem root | ✅ |
 | T02 | Config | defaults match FABLE_PLAN §13 (change_home=false, guards on, exclusions on, XDG opt-in off); unknown schema version rejected; round-trip | ⬜ |
 | T03 | status | active output (roots+homes); inactive output | ⬜ |
 | T04 | init layout | creates .agentmod tree (claude/codex/opencode/node/snapshots); never deletes/overwrites existing dirs | ⬜ |

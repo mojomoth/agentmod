@@ -1,15 +1,21 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-10 (iteration: Phase 1 task 1 — Go skeleton)
+Last updated: 2026-06-10 (iteration: Phase 1 task 2 — internal/project)
 
 ## Where things stand
-- Phase 0 (harness) COMPLETE. Phase 1 started.
+- Phase 0 (harness) COMPLETE. Phase 1 in progress (2 of 4 items done).
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26, zero deps — toml deferred per
   D009), thin `main.go`, `internal/cli` dispatcher with `--version`/
   `version`/`help`/unknown-command handling, exit-code constants
   (0/1/2/3 per IMPLEMENTATION_PLAN §3), table tests + exit-code contract
-  test. `gofmt -l` clean, `go vet` clean, `go test ./...` PASSES.
+  test.
+- `internal/project` LANDED and green (T01 ✅): `Discover(startDir)` walks
+  upward to filesystem root for `.agentmod/agentmod.toml`, nearest-wins,
+  lexical (no symlink resolution), marker must be a regular file (D011).
+  Exposes `Project{Root, AgentmodDir, ConfigPath}`, `ErrNotFound`,
+  `DirName`/`ConfigFileName` constants. 7 tests, all temp-dir based.
+  `gofmt -l` clean, `go vet` clean, `go test ./...` PASSES.
 
 ## Toolchain baseline (verified on this machine, 2026-06-10)
 - go 1.26.2 darwin/arm64 · claude 2.1.170 · codex-cli 0.137.0 · opencode 1.4.3
@@ -30,10 +36,12 @@ NOT a violation; only new entries/mtime changes caused by our work are.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 1, next unchecked TASKS.md item: `internal/project` — upward discovery
-of `.agentmod/agentmod.toml` (found in cwd; found in ancestor; nearest-wins
-with nested projects; not found; stops at filesystem root) + tests
-(TEST_MATRIX T01). Use temp dirs; no real agent homes involved.
+Phase 1, next unchecked TASKS.md item: `internal/config` — TOML schema for
+agentmod.toml, defaults per FABLE_PLAN §13, validation (change_home must be
+false; unknown schema_version rejected) + tests (TEST_MATRIX T02, including
+round-trip). This is the iteration that adds `github.com/BurntSushi/toml`
+to go.mod (D004/D009). `internal/project.Discover` provides ConfigPath to
+load from.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

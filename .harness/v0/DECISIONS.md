@@ -70,3 +70,13 @@ open-gstack-browser; global-home mtimes 2026-06-06/-05 and 2026-04-30 all
 predate this repo). That is NOT pollution from this project. The check
 compares against the baseline recorded in STATE.md; only gstack entries that
 APPEAR after baseline are violations.
+
+## D011 — 2026-06-10 — Project discovery is lexical; marker must be a regular file
+`internal/project.Discover` makes startDir absolute WITHOUT resolving
+symlinks (filepath.Abs, no EvalSymlinks): activation follows the path the
+user is standing in, matching how the shell hook will see $PWD; resolving
+symlinks could activate a project the user never visibly entered. The marker
+is valid only when `.agentmod/agentmod.toml` is a regular file — a bare
+`.agentmod/` directory or a directory named `agentmod.toml` does not
+activate. Stat errors on ancestors (e.g. permissions) are treated as
+"no project here" and the walk continues, rather than failing discovery.

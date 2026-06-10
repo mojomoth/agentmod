@@ -82,3 +82,22 @@ func Vars(agentmodDir string, cfg config.Config) []Var {
 func NodeBinDir(agentmodDir string) string {
 	return filepath.Join(agentmodDir, layout.NodeDir, "bin")
 }
+
+// RoutedNames returns the name of every variable agentmod can ever route,
+// independent of any particular project's config (single source: Vars with
+// every agent and XDG opt-in enabled). Doctor uses it to detect routed
+// values lingering in shells that are outside any project.
+func RoutedNames() []string {
+	cfg := config.Default()
+	cfg.Claude.Enabled = true
+	cfg.Codex.Enabled = true
+	cfg.OpenCode.Enabled = true
+	cfg.OpenCode.XDGFullIsolation = true
+	cfg.Node.Enabled = true
+	vars := Vars("", cfg)
+	names := make([]string, len(vars))
+	for i, v := range vars {
+		names[i] = v.Name
+	}
+	return names
+}

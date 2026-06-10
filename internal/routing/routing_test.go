@@ -72,3 +72,15 @@ func TestNodeBinDir(t *testing.T) {
 		t.Errorf("NodeBinDir = %q", got)
 	}
 }
+
+func TestRoutedNamesIsTheFullSuperset(t *testing.T) {
+	got := RoutedNames()
+	want := []string{
+		"CLAUDE_CONFIG_DIR", "CODEX_HOME", "OPENCODE_CONFIG",
+		"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME",
+		"NPM_CONFIG_CACHE", "NPM_CONFIG_PREFIX", "PNPM_HOME", "BUN_INSTALL",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("RoutedNames = %v, want %v", got, want)
+	}
+}

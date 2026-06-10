@@ -1,7 +1,7 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 3 — doctor
-project/root/shell/hook/env checks, slice 1)
+Last updated: 2026-06-11 (iteration: Phase 3 — doctor slice 2:
+lingering-vars / dup-PATH / HOME / shim warnings)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
@@ -217,6 +217,29 @@ project/root/shell/hook/env checks, slice 1)
     are ok-level so a fresh machine exits 0; identical conditions inside a
     project warn. Outside-project routing check is SKIPPED entirely —
     lingering-vars is the next task; don't print "ok" for it meanwhile.
+- doctor slice 2 LANDED and green (Phase 3 item 2 ✅, D022): four §23
+  warning families added to doctor.go, all read-only, exit contract
+  unchanged. Read D021 + D022 before extending doctor.
+  - "Routing env" outside a project is now the LINGERING audit (the slice-1
+    skip is gone): bookkeeping vars / SAVED_* / routed values containing an
+    `.agentmod` path element / `.agentmod` PATH entries → warn with the
+    deactivate-eval remedy; user's own routed-name vars stay silent. New
+    `routing.RoutedNames()` is the probe superset (single source = Vars).
+  - "PATH" (inside a project): dup NodeBinDir entries warn; missing while
+    active+cfgOK+node-enabled warns; foreign `.agentmod` entries warn;
+    exactly-1-while-inactive is deliberately ok (routingFinding owns that).
+  - "HOME" (always): AGENTMOD_SAVED_HOME present or HOME inside an
+    `.agentmod` → warn; unset HOME is ok-level.
+  - "Shims" (inside a project): scans node/bin only for
+    claude/codex/opencode; symlink resolving inside .agentmod = ok
+    (project-local npm install, named in detail); anything else warns.
+    EvalSymlinks both sides (macOS /var). `hasAgentmodElement` is the
+    shared points-into-an-agentmod-root test.
+  - healthyVars (doctor_test.go) now includes PATH with the project's
+    node/bin once — new tests that perturb PATH must start from it.
+    9 new test funcs; TestDoctorAllHealthy asserts the three new ok lines;
+    fresh-machine test now asserts the ok lingering line instead of
+    absence of "Routing env".
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -249,28 +272,21 @@ mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 3 second item: "doctor: HOME-change, shim, lingering-vars, dup-PATH
-warnings" (TASKS.md Phase 3 top unchecked). Before writing code:
-- Read D021 (doctor structure/severity/exit contract) — extend the findings
-  list in doctor.go; do NOT change exit semantics.
-- Lingering vars (§23): OUTSIDE a project (or project disabled), any
-  AGENTMOD_* / routed var still set → warn. This is the routing check
-  doctor currently SKIPS outside projects — slot it exactly there.
-  routing.EnvVarsList/SavedPrefix + routing.Vars name the vars to probe.
-- Dup-PATH: count exact-match PATH entries equal to
-  routing.NodeBinDir(agentmodDir) — >1 → warn (integration_test.go's
-  countPathEntries shows the split-and-compare pattern). Likely also: when
-  active for this root + node enabled, node/bin ABSENT from PATH → warn
-  (deferred from slice 1 — note in test).
-- HOME-changed: needs a notion of "expected HOME"; the hook never touches
-  HOME, so the realistic check is AGENTMOD_SAVED_HOME existing at all or
-  HOME pointing INSIDE .agentmod → warn (decide + record in DECISIONS).
-- Shim detection: look for agent-named executables (claude/codex/opencode)
-  in .agentmod-controlled PATH dirs (node/bin) that are NOT the real
-  binaries — FABLE_PLAN §2 forbids agentmod creating them; doctor flags
-  ones created by other tools. Keep it cheap: scan node/bin only.
-- Each warning: positive + negative test (T29 row), fakeEnv + temp dirs
-  only.
+Phase 3 third item: "doctor: per-agent home state incl. auth present /
+re-login needed" (TASKS.md Phase 3 top unchecked). Before writing code:
+- Read D021 + D022 (doctor structure/severity/exit contract); extend the
+  findings list in doctor.go, do NOT change exit semantics.
+- Spec: FABLE_PLAN §23 ("Claude/Codex/OpenCode binaries present",
+  "Claude/Codex project-local home state including auth present /
+  re-login needed per §12", "OpenCode project-local config state") + §15
+  (per-agent auth file locations) — read §12/§15 first; auth FILE NAMES
+  inside the project-local homes are the check subjects
+  (e.g. .agentmod/claude/.credentials.json — confirm names in §15).
+- Binary presence: LookupEnv("PATH") walk + os.Stat per agent name —
+  doctor has no exec; keep it stat-based like the shim check.
+- Auth state is read-only detection; auth copy-on-consent (the fixer) is
+  a separate Phase 3 task. Tests: fakeEnv + temp homes with fixture
+  files using obviously-fake values (CHECKS.md §5).
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

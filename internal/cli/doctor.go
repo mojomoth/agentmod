@@ -77,6 +77,7 @@ func runDoctor(args []string, stdout, stderr io.Writer, env Env) int {
 			add(diagOK, "Config", proj.ConfigPath+" is valid")
 		}
 		findings = append(findings, layoutFinding(proj.AgentmodDir))
+		findings = append(findings, shimFinding(proj.AgentmodDir))
 	}
 
 	// Shell type + rc-hook block. The skip reasons (exotic shell, no
@@ -110,11 +111,16 @@ func runDoctor(args []string, stdout, stderr io.Writer, env Env) int {
 		}
 	}
 
-	// Routing env vars in this shell. Outside a project this check is the
-	// lingering-vars warning, which is a separate doctor task.
+	// Routing env vars in this shell. Inside a project: applied / stale /
+	// drifted classification plus the PATH-entry audit. Outside: the §23
+	// lingering-vars check (the hook must leave nothing behind).
 	if inProject {
 		findings = append(findings, routingFinding(env, proj, cfg, cfgOK, hookInstalled, shell))
+		findings = append(findings, pathFinding(env, proj, cfg, cfgOK))
+	} else {
+		findings = append(findings, lingeringFinding(env, shell))
 	}
+	findings = append(findings, homeFinding(env))
 
 	problems := 0
 	for _, f := range findings {
@@ -184,7 +190,7 @@ func routingFinding(env Env, proj *project.Project, cfg config.Config, cfgOK, ho
 
 // misroutedVars lists routed variables whose current value differs from what
 // activation would set (unset counts as a mismatch). PATH is excluded here:
-// duplicate/missing PATH entries are a separate doctor task.
+// duplicate/missing PATH entries are pathFinding's job.
 func misroutedVars(env Env, agentmodDir string, cfg config.Config) []string {
 	var bad []string
 	for _, v := range routing.Vars(agentmodDir, cfg) {
@@ -193,4 +199,158 @@ func misroutedVars(env Env, agentmodDir string, cfg config.Config) []string {
 		}
 	}
 	return bad
+}
+
+// agentNames are the binaries an attacker-or-tool-created shim would shadow.
+var agentNames = []string{"claude", "codex", "opencode"}
+
+// shimFinding audits .agentmod/node/bin (the one PATH dir agentmod manages)
+// for agent-named entries. A symlink resolving inside .agentmod is a
+// legitimate project-local install (npm's bin layout); anything else shadows
+// the real binary while routing is active, and agentmod itself never creates
+// such entries (FABLE_PLAN §2), so it warns.
+func shimFinding(agentmodDir string) finding {
+	binDir := routing.NodeBinDir(agentmodDir)
+	var local, shims []string
+	for _, name := range agentNames {
+		path := filepath.Join(binDir, name)
+		info, err := os.Lstat(path)
+		if err != nil {
+			continue
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			if target, err := filepath.EvalSymlinks(path); err == nil && insideDir(target, agentmodDir) {
+				local = append(local, name)
+				continue
+			}
+		}
+		shims = append(shims, name)
+	}
+	switch {
+	case len(shims) > 0:
+		return finding{diagWarn, "Shims", fmt.Sprintf(
+			"agent-named executable(s) in .agentmod/node/bin shadow the real binaries: %s — agentmod never creates shims; remove them (project-local installs via npm are symlinks into .agentmod)", strings.Join(shims, ", "))}
+	case len(local) > 0:
+		return finding{diagOK, "Shims", fmt.Sprintf(
+			"none — %s in .agentmod/node/bin are project-local installs (symlinks into .agentmod)", strings.Join(local, ", "))}
+	}
+	return finding{diagOK, "Shims", "none in .agentmod/node/bin (agentmod never creates shims)"}
+}
+
+// insideDir reports whether path is dir or lies underneath it, resolving
+// symlinks in dir first (macOS temp dirs: /var vs /private/var).
+func insideDir(path, dir string) bool {
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// pathFinding audits PATH against the project (§23 "Duplicate agentmod PATH
+// entries"): the managed node/bin entry must appear at most once, exactly
+// once while routing is active with node enabled, and no entry from another
+// project's .agentmod may linger. A single entry while routing is NOT active
+// is left to routingFinding's warning — same root cause, one remedy.
+func pathFinding(env Env, proj *project.Project, cfg config.Config, cfgOK bool) finding {
+	path, _ := env.LookupEnv("PATH")
+	binDir := routing.NodeBinDir(proj.AgentmodDir)
+	count := 0
+	var foreign []string
+	for _, entry := range strings.Split(path, string(os.PathListSeparator)) {
+		switch {
+		case entry == binDir:
+			count++
+		case entry != "" && hasAgentmodElement(entry):
+			foreign = append(foreign, entry)
+		}
+	}
+	active, root, rootKnown := routingEnvState(env)
+	activeHere := active && rootKnown && root == proj.Root
+
+	var issues []string
+	if count > 1 {
+		issues = append(issues, fmt.Sprintf("%s appears %d times on PATH (must be at most once)", binDir, count))
+	}
+	if len(foreign) > 0 {
+		issues = append(issues, "entries from another .agentmod linger: "+strings.Join(foreign, ", "))
+	}
+	if count == 0 && activeHere && cfgOK && cfg.Node.Enabled {
+		issues = append(issues, binDir+" is missing from PATH while routing is active")
+	}
+	if len(issues) > 0 {
+		return finding{diagWarn, "PATH", strings.Join(issues, "; ") + " — open a new terminal or cd out of the project and back in"}
+	}
+	if count == 1 {
+		return finding{diagOK, "PATH", binDir + " on PATH once"}
+	}
+	return finding{diagOK, "PATH", "no agentmod entries (node routing not applied)"}
+}
+
+// lingeringFinding is the outside-a-project half of the routing audit (§23
+// "agentmod env vars lingering in a folder without .agentmod"): deactivation
+// must leave no bookkeeping vars, no saved values, no routed value pointing
+// into an .agentmod, and no .agentmod PATH entry.
+func lingeringFinding(env Env, shell string) finding {
+	var lingering []string
+	for _, name := range []string{routing.EnvActive, routing.EnvProjectRoot, routing.EnvRoot, routing.EnvVarsList} {
+		if _, ok := env.LookupEnv(name); ok {
+			lingering = append(lingering, name)
+		}
+	}
+	for _, name := range routing.RoutedNames() {
+		if v, ok := env.LookupEnv(name); ok && hasAgentmodElement(v) {
+			lingering = append(lingering, name)
+		}
+		if _, ok := env.LookupEnv(routing.SavedPrefix + name); ok {
+			lingering = append(lingering, routing.SavedPrefix+name)
+		}
+	}
+	if path, ok := env.LookupEnv("PATH"); ok {
+		for _, entry := range strings.Split(path, string(os.PathListSeparator)) {
+			if entry != "" && hasAgentmodElement(entry) {
+				lingering = append(lingering, "PATH entry "+entry)
+			}
+		}
+	}
+	if len(lingering) == 0 {
+		return finding{diagOK, "Routing env", "no agentmod variables lingering in this shell"}
+	}
+	remedy := " — open a new terminal"
+	if shell != "" {
+		remedy += fmt.Sprintf(`, or run: eval "$(agentmod env --shell %s --deactivate)"`, shell)
+	}
+	return finding{diagWarn, "Routing env",
+		"agentmod environment lingering outside any project: " + strings.Join(lingering, ", ") + remedy}
+}
+
+// homeFinding checks §23 "HOME changed": agentmod never saves, sets, or
+// routes HOME, so a saved copy or a HOME inside an .agentmod directory means
+// some other tool (or a tampered hook) changed it.
+func homeFinding(env Env) finding {
+	if v, ok := env.LookupEnv(routing.SavedPrefix + "HOME"); ok {
+		return finding{diagWarn, "HOME", fmt.Sprintf(
+			"%sHOME is set (%s) — agentmod never saves or changes HOME; unset it and check what modified your environment", routing.SavedPrefix, v)}
+	}
+	home, ok := env.LookupEnv("HOME")
+	if !ok {
+		return finding{diagOK, "HOME", "not set in this shell (not agentmod's doing — agentmod never modifies HOME)"}
+	}
+	if hasAgentmodElement(home) {
+		return finding{diagWarn, "HOME", fmt.Sprintf(
+			"points inside an .agentmod directory (%s) — agentmod never changes HOME; restore your real home directory", home)}
+	}
+	return finding{diagOK, "HOME", "no signs of tampering (agentmod never modifies HOME)"}
+}
+
+// hasAgentmodElement reports whether one of p's path elements is exactly
+// ".agentmod" — the marker that a value points into some project's agentmod
+// root, whosever it is.
+func hasAgentmodElement(p string) bool {
+	for _, el := range strings.Split(filepath.ToSlash(p), "/") {
+		if el == ".agentmod" {
+			return true
+		}
+	}
+	return false
 }

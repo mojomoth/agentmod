@@ -294,3 +294,35 @@ a flat `[]finding{level, label, detail}` list; levels ok/warn/error; output
   the next doctor task. Outside a project the routing check is skipped
   entirely (lingering-vars warning belongs to that same next task; do not
   print a misleading "ok" meanwhile).
+
+## D022 — 2026-06-11 — doctor slice 2: lingering / PATH / HOME / shims
+Four §23 warnings added to doctor (read with D021; exit semantics unchanged):
+- **Lingering (outside a project)** fills the slot D021 left skipped, under
+  the same "Routing env" label: warn if any bookkeeping var is set, any
+  `AGENTMOD_SAVED_<routed>` exists, any routed-name var's VALUE contains an
+  `.agentmod` path element, or any PATH entry does. A routed-name var
+  pointing elsewhere is the user's own setting — silence. The probe list is
+  `routing.RoutedNames()` (new): Vars() with every agent + XDG enabled, so
+  the superset can never drift from the emitter. Remedy: new terminal or
+  `eval "$(agentmod env --shell <shell> --deactivate)"` (deactivate works
+  off env bookkeeping alone, D016, so it is valid outside a project);
+  shell part omitted when $SHELL is undetectable.
+- **PATH (inside a project)**: exact-match count of this project's
+  NodeBinDir — >1 warns (dups); 0 while active-for-this-root + cfgOK +
+  node enabled warns (missing); any OTHER entry containing an `.agentmod`
+  element warns (foreign project leak). Exactly-1-while-NOT-active is
+  deliberately ok: routingFinding already warns about the inactive state,
+  same root cause, one remedy (avoids double-counting).
+- **HOME (always)**: agentmod never saves/sets HOME, so warn iff
+  AGENTMOD_SAVED_HOME exists or HOME contains an `.agentmod` element;
+  HOME-unset is ok-level (not our doing; shell-hook skip already covers it).
+- **Shims (inside a project)**: scan ONLY node/bin (the one PATH dir we
+  manage) for entries named claude/codex/opencode. Legit = symlink
+  resolving inside .agentmod (npm bin layout for a project-local install →
+  ok, named in the detail); everything else (script/regular file/dangling
+  or escaping symlink) warns. EvalSymlinks both sides (macOS /var →
+  /private/var). Which-style full-PATH scanning rejected as not cheap and
+  full of false positives.
+- `.agentmod`-element matching (`hasAgentmodElement`) is the shared
+  "points into some agentmod root, whosever it is" test for HOME, lingering
+  values, and PATH entries.

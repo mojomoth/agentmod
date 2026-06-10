@@ -32,13 +32,15 @@ func healthyVars(t *testing.T, root string) map[string]string {
 	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte(rcBlockFor("zsh")), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	agentmodDir := filepath.Join(root, ".agentmod")
 	vars := map[string]string{
 		"SHELL":                 "/bin/zsh",
 		"HOME":                  home,
+		"PATH":                  routing.NodeBinDir(agentmodDir) + sep + "/usr/bin",
 		"AGENTMOD_ACTIVE":       "1",
 		"AGENTMOD_PROJECT_ROOT": root,
 	}
-	for _, v := range routing.Vars(filepath.Join(root, ".agentmod"), config.Default()) {
+	for _, v := range routing.Vars(agentmodDir, config.Default()) {
 		vars[v.Name] = v.Value
 	}
 	return vars
@@ -85,8 +87,12 @@ func TestDoctorAllHealthy(t *testing.T) {
 	wantLevel(t, findingLine(t, stdout, "Shell"), diagOK)
 	wantLevel(t, findingLine(t, stdout, "Shell hook"), diagOK)
 	wantLevel(t, findingLine(t, stdout, "Routing env"), diagOK)
+	wantLevel(t, findingLine(t, stdout, "Shims"), diagOK)
+	wantLevel(t, findingLine(t, stdout, "PATH"), diagOK)
+	wantLevel(t, findingLine(t, stdout, "HOME"), diagOK)
 	wantContains(t, "Project line", findingLine(t, stdout, "Project"), root, filepath.Join(root, ".agentmod"))
 	wantContains(t, "Routing line", findingLine(t, stdout, "Routing env"), "applied for this project")
+	wantContains(t, "PATH line", findingLine(t, stdout, "PATH"), "on PATH once")
 }
 
 func TestDoctorOutsideProjectFreshMachineIsClean(t *testing.T) {
@@ -102,9 +108,11 @@ func TestDoctorOutsideProjectFreshMachineIsClean(t *testing.T) {
 	hook := findingLine(t, stdout, "Shell hook")
 	wantLevel(t, hook, diagOK)
 	wantContains(t, "Shell hook line", hook, "not installed", "run 'agentmod init' inside a project")
-	if strings.Contains(stdout, "Routing env") {
-		t.Errorf("routing-env check must not report outside a project (lingering-vars is a separate check):\n%s", stdout)
-	}
+	// Outside a project the routing check is the lingering-vars audit.
+	lingering := findingLine(t, stdout, "Routing env")
+	wantLevel(t, lingering, diagOK)
+	wantContains(t, "Routing line", lingering, "no agentmod variables lingering")
+	wantLevel(t, findingLine(t, stdout, "HOME"), diagOK)
 }
 
 func TestDoctorHookInstalledButInactive(t *testing.T) {
@@ -303,6 +311,204 @@ func TestDoctorShellUndetectable(t *testing.T) {
 		t.Fatalf("outside: exit = %d, want %d\n%s", code, ExitOK, stdout)
 	}
 	wantLevel(t, findingLine(t, stdout, "Shell hook"), diagOK)
+}
+
+func TestDoctorLingeringVarsOutsideProject(t *testing.T) {
+	// §23: "agentmod env vars lingering in a folder without .agentmod" —
+	// bookkeeping vars, saved values, routed values pointing into an
+	// .agentmod, and the managed PATH entry must all be flagged.
+	env := fakeEnv(t.TempDir(), map[string]string{
+		"SHELL":                            "/bin/zsh",
+		"HOME":                             t.TempDir(),
+		"AGENTMOD_ACTIVE":                  "1",
+		"AGENTMOD_VARS":                    "CLAUDE_CONFIG_DIR",
+		"CLAUDE_CONFIG_DIR":                "/gone/.agentmod/claude",
+		"AGENTMOD_SAVED_CLAUDE_CONFIG_DIR": "/users/me/custom",
+		"PATH":                             "/gone/.agentmod/node/bin" + sep + "/usr/bin",
+	})
+	code, stdout, _ := runDoctorForTest(t, env)
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "Routing env")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "Routing line", line,
+		"lingering outside any project",
+		"AGENTMOD_ACTIVE", "AGENTMOD_VARS",
+		"CLAUDE_CONFIG_DIR", "AGENTMOD_SAVED_CLAUDE_CONFIG_DIR",
+		"PATH entry /gone/.agentmod/node/bin",
+		`eval "$(agentmod env --shell zsh --deactivate)"`,
+	)
+}
+
+func TestDoctorOutsideProjectUsersOwnVarsAreNotLingering(t *testing.T) {
+	// A routed-name variable the USER set (no .agentmod in its value) is
+	// their own business — silence, exit 0.
+	env := fakeEnv(t.TempDir(), map[string]string{
+		"SHELL":             "/bin/zsh",
+		"HOME":              t.TempDir(),
+		"CLAUDE_CONFIG_DIR": "/users/me/my-own-claude-home",
+		"PATH":              "/usr/bin" + sep + "/bin",
+	})
+	code, stdout, _ := runDoctorForTest(t, env)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+	}
+	wantContains(t, "Routing line", findingLine(t, stdout, "Routing env"), "no agentmod variables lingering")
+}
+
+func TestDoctorDuplicatePathEntries(t *testing.T) {
+	// §23: "Duplicate agentmod PATH entries".
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	vars := healthyVars(t, root)
+	binDir := routing.NodeBinDir(filepath.Join(root, ".agentmod"))
+	vars["PATH"] = binDir + sep + "/usr/bin" + sep + binDir
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, vars))
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "PATH")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "PATH line", line, "appears 2 times", "open a new terminal")
+}
+
+func TestDoctorNodeBinMissingFromPathWhileActive(t *testing.T) {
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	vars := healthyVars(t, root)
+	vars["PATH"] = "/usr/bin" + sep + "/bin"
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, vars))
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "PATH")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "PATH line", line, "missing from PATH while routing is active")
+
+	// Negative: same PATH while routing is NOT applied is expected — that
+	// state is routingFinding's warning, not PATH's.
+	for k := range vars {
+		if strings.HasPrefix(k, "AGENTMOD") {
+			delete(vars, k)
+		}
+	}
+	_, stdout, _ = runDoctorForTest(t, fakeEnv(root, vars))
+	line = findingLine(t, stdout, "PATH")
+	wantLevel(t, line, diagOK)
+	wantContains(t, "PATH line", line, "no agentmod entries")
+}
+
+func TestDoctorForeignAgentmodPathEntry(t *testing.T) {
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	vars := healthyVars(t, root)
+	vars["PATH"] = vars["PATH"] + sep + "/elsewhere/.agentmod/node/bin"
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, vars))
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "PATH")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "PATH line", line, "another .agentmod", "/elsewhere/.agentmod/node/bin")
+}
+
+func TestDoctorHomeChanged(t *testing.T) {
+	// §23: "HOME changed". agentmod never saves or routes HOME, so either
+	// signal means some other tool tampered with the environment.
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+
+	vars := healthyVars(t, root)
+	vars["AGENTMOD_SAVED_HOME"] = "/users/me"
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, vars))
+	if code != ExitValidation {
+		t.Fatalf("saved-home: exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "HOME")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "HOME line", line, "AGENTMOD_SAVED_HOME", "never saves or changes HOME")
+
+	vars = healthyVars(t, root)
+	vars["HOME"] = filepath.Join(root, ".agentmod", "home")
+	code, stdout, _ = runDoctorForTest(t, fakeEnv(root, vars))
+	if code != ExitValidation {
+		t.Fatalf("home-inside: exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line = findingLine(t, stdout, "HOME")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "HOME line", line, "points inside an .agentmod directory")
+}
+
+func TestDoctorShimDetected(t *testing.T) {
+	// §23: "Shim detected" — agent-named entries in the managed node/bin
+	// that are not npm-style symlinks into .agentmod shadow the real
+	// binaries.
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	binDir := filepath.Join(root, ".agentmod", "node", "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A script shim and a symlink escaping .agentmod: both warn.
+	if err := os.WriteFile(filepath.Join(binDir, "claude"), []byte("#!/bin/sh\nexec /usr/bin/true\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "codex")
+	if err := os.WriteFile(outside, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(binDir, "codex")); err != nil {
+		t.Fatal(err)
+	}
+	// An npm-style project-local install: symlink into .agentmod — fine.
+	target := filepath.Join(root, ".agentmod", "node", "lib", "node_modules", "opencode", "cli.js")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("#!/usr/bin/env node\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(binDir, "opencode")); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "Shims")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "Shims line", line, "claude", "codex", "never creates shims")
+	if strings.Contains(line, "opencode") {
+		t.Errorf("project-local npm install reported as a shim:\n%s", line)
+	}
+}
+
+func TestDoctorProjectLocalInstallIsNotAShim(t *testing.T) {
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	binDir := filepath.Join(root, ".agentmod", "node", "bin")
+	target := filepath.Join(root, ".agentmod", "node", "lib", "node_modules", "claude", "cli.js")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("#!/usr/bin/env node\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(binDir, "claude")); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+	}
+	line := findingLine(t, stdout, "Shims")
+	wantLevel(t, line, diagOK)
+	wantContains(t, "Shims line", line, "claude", "project-local installs")
 }
 
 func TestDoctorRejectsArgs(t *testing.T) {

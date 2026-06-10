@@ -1,12 +1,12 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 2 — scripted-shell integration
-tests, T11)
+Last updated: 2026-06-11 (iteration: Phase 2 — init first-session
+limitation message + hook-active diagnosis, T08a)
 
 ## Where things stand
-- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 items 1–9 LANDED
-  (init + both shell hooks + rc editor + env-hygiene integration tests;
-  only the init first-session-limitation message remains in Phase 2).
+- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. **Phase 2 COMPLETE** (init +
+  both shell hooks + rc editor + env-hygiene integration tests + the
+  first-session diagnosis). Next up: Phase 3 (doctor + guard + auth).
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -184,6 +184,21 @@ tests, T11)
   - Gotcha that cost one red run: section markers must differ between the
     open and close lines for BOTH dumps — parser expects `===ENDENV0===`,
     not `===END0===`.
+- init first-session diagnosis LANDED and green (T08a ✅, D020):
+  `hookActivationNotice(res, projectRoot, env)` in rcfile.go, printed by
+  runInit between the "Shell hook:" line and the closing status hint.
+  `ensureShellHook` now returns `shellHookResult{Line, Action, Shell}`
+  (Action gained rcSkipped) instead of a bare string — future callers
+  (doctor) can reuse both. Matrix in D020: AGENTMOD_ACTIVE=1 → live
+  message (same root "already routing" / other root "switches at next
+  prompt", printed even under --no-shell-hook); not live + block present →
+  first-session caveat (new terminal / exec $SHELL / one-shot eval), with
+  the "already-loaded hook picks it up next prompt" hedge ONLY for
+  rcUpdated/rcUnchanged (an rcInstalled block is brand new, hook provably
+  not loaded); not live + skipped → silent (skip reason suffices, CI
+  quiet). TestInitHookActivationNotice: 6-case table in rcfile_test.go,
+  fakeEnv only. No existing test needed changes (all stdout assertions
+  are substring-based).
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -216,23 +231,23 @@ mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 2 final item: "init: first-session limitation message + hook-active
-diagnosis" (TASKS.md Phase 2 last unchecked). Scope per FABLE_PLAN §12/§24
-and the GOAL "first-session hook caveat":
-- After installing/updating the rc block, init must tell the user the hook
-  is NOT live in the CURRENT shell — they must `exec $SHELL`, open a new
-  terminal, or `eval "$(agentmod hook <shell>)"` once (direnv-style
-  first-session caveat; same wording later goes into README limitations).
-- Diagnosis: init can detect an already-active hook via the env it was
-  invoked with (AGENTMOD_ACTIVE / AGENTMOD_PROJECT_ROOT through the
-  injected Env — status.go already reads these; see its "Shell routing"
-  logic) and skip/soften the message when routing is already applied, or
-  note stale-root. Don't over-engineer: message choice is plain string
-  logic on (rc result × env state); table-test it in init_test.go or
-  rcfile_test.go with fakeEnv — no real shells needed.
-- Read D019 first (ensureShellHook return values) — the message likely
-  hangs off shellHookTarget/ensureRCBlock outcomes already reported on the
-  "Shell hook:" line.
+Phase 3 first item: "doctor: project/root/shell/hook/env checks" (TASKS.md
+Phase 3 top unchecked). Before writing code:
+- Read FABLE_PLAN §23 (doctor warning catalogue) and §24 neighborhood for
+  output conventions; doctor rows are T29 in TEST_MATRIX.md (each warning
+  needs a positive + negative test).
+- Doctor is read-only diagnosis: project discovery (reuse internal/project),
+  config load errors, .agentmod layout completeness (internal/layout),
+  rc-block presence/staleness (shellHookTarget/ensureRCBlock parsing — but
+  do NOT write; today's ensureRCBlock writes, so factor out or reimplement
+  a read-only block inspector), and env state (AGENTMOD_ACTIVE/
+  AGENTMOD_PROJECT_ROOT vs discovered root — same logic as
+  status.shellRoutingState and D020's hookActivationNotice; reuse, don't
+  fork wording a third time without need).
+- Keep slice small: this item is just project/root/shell/hook/env checks;
+  HOME-change/shim/lingering-vars/dup-PATH warnings and per-agent auth
+  state are SEPARATE TASKS.md items — don't gold-plate.
+- Everything through injected Env + temp dirs; no real shells needed.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

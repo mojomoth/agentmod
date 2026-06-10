@@ -243,3 +243,25 @@ fenced block (FABLE_PLAN §12); code in `internal/cli/rcfile.go`.
   tests run on throwaway homes and the dev guard never fires.
   `ensureShellHook` checks --no-shell-hook before computing any path
   (that's T06's enforcement row, now tested for real).
+
+## D020 — 2026-06-11 — init first-session diagnosis (Phase 2 final item)
+After the "Shell hook:" line, init prints `hookActivationNotice` (rcfile.go):
+plain string logic on (rc outcome × AGENTMOD_* env), per FABLE_PLAN §12
+"diagnose whether the hook is active; say so precisely".
+- **Live detection**: AGENTMOD_ACTIVE=1 via the injected Env (same signal
+  status.go reads). ROOT == cwd → "already routing this project". ROOT !=
+  cwd → "live (routing <root>); switches to this project at your next
+  prompt" — true because the hook fires per prompt and init's cwd is now
+  the nearest root. Live messages print even under --no-shell-hook.
+- **Not live + block present**: the first-session caveat (a process cannot
+  modify its parent shell) with three remedies: new terminal, `exec $SHELL`,
+  one-shot `eval "$(agentmod hook <shell>)"`. For rcUpdated/rcUnchanged
+  (block predates this shell) add the hedge that an already-loaded hook
+  picks the project up at the next prompt instead; for rcInstalled the
+  block is brand new, so no hedge — we KNOW the hook isn't loaded.
+- **Not live + skipped** (--no-shell-hook / exotic shell / no SHELL/HOME):
+  no notice — the skip reason on the Shell hook line already says what to
+  do; CI runs stay quiet.
+- ensureShellHook now returns `shellHookResult{Line, Action, Shell}`
+  (Action adds rcSkipped); the notice is table-tested in rcfile_test.go
+  (6 cases) with fakeEnv only — no real shells.

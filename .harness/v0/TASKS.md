@@ -29,7 +29,7 @@ Add/split items freely; keep units small.
 - [x] `agentmod hook bash` (+ tests)
 - [x] rc fenced-block insert/update, never duplicate, never touch user content (+ tests)
 - [x] scripted-shell integration tests: activate/deactivate/cross-project, PATH dedup, HOME untouched
-- [ ] init: first-session limitation message + hook-active diagnosis
+- [x] init: first-session limitation message + hook-active diagnosis
 
 ## Phase 3 — doctor + guard + auth
 - [ ] doctor: project/root/shell/hook/env checks (+ tests)

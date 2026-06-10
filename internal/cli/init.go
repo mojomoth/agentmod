@@ -120,7 +120,7 @@ func runInit(args []string, stdout, stderr io.Writer, env Env) int {
 		fmt.Fprintf(stderr, "agentmod: %v\n", err)
 		return ExitError
 	}
-	hookStatus, err := ensureShellHook(opts, env)
+	hookRes, err := ensureShellHook(opts, env)
 	if err != nil {
 		fmt.Fprintf(stderr, "agentmod: %v\n", err)
 		return ExitError
@@ -135,7 +135,10 @@ func runInit(args []string, stdout, stderr io.Writer, env Env) int {
 	fmt.Fprintf(stdout, "  agentmod.toml:   %s\n", describeWrite(wroteConfig, "defaults"))
 	fmt.Fprintf(stdout, "  opencode.json:   %s\n", describeWrite(wroteStub, "stub"))
 	fmt.Fprintf(stdout, "  .gitignore:      %s\n", gitignoreStatus)
-	fmt.Fprintf(stdout, "  Shell hook:      %s\n", hookStatus)
+	fmt.Fprintf(stdout, "  Shell hook:      %s\n", hookRes.Line)
+	if notice := hookActivationNotice(hookRes, cwd, env); notice != "" {
+		fmt.Fprint(stdout, notice)
+	}
 	fmt.Fprintf(stdout, "Run 'agentmod status' to see where agent homes will route.\n")
 	return ExitOK
 }

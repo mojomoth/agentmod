@@ -307,3 +307,93 @@ func TestRcBlockShellSyntax(t *testing.T) {
 		}
 	})
 }
+
+// TestInitHookActivationNotice covers the first-session diagnosis
+// (FABLE_PLAN §12): init must say precisely whether the hook is routing the
+// invoking shell, keyed on (rc-file outcome × AGENTMOD_* env state). All
+// state arrives through fakeEnv — no real shells involved.
+func TestInitHookActivationNotice(t *testing.T) {
+	const (
+		notActive    = "NOT active in this shell session"
+		nextPromptPS = "at your next prompt instead"
+		liveHere     = "already routing this project"
+		liveSwitch   = "It will switch to this project at your next prompt."
+	)
+	cases := []struct {
+		name     string
+		flags    []string
+		preBlock bool // pre-install the current zsh block in ~/.zshrc
+		amVars   func(root string) map[string]string
+		want     []string
+		notWant  []string
+	}{
+		{
+			name: "fresh install, hook not live",
+			want: []string{notActive, "exec $SHELL", `eval "$(agentmod hook zsh)"`},
+			// Block was just created, so "already loaded" hedge must be absent.
+			notWant: []string{nextPromptPS},
+		},
+		{
+			name:     "already installed, hook not live",
+			preBlock: true,
+			// Block predates this shell: hedge that a loaded hook fires next prompt.
+			want: []string{notActive, nextPromptPS},
+		},
+		{
+			name: "hook live for this project",
+			amVars: func(root string) map[string]string {
+				return map[string]string{"AGENTMOD_ACTIVE": "1", "AGENTMOD_PROJECT_ROOT": root}
+			},
+			want:    []string{liveHere},
+			notWant: []string{notActive},
+		},
+		{
+			name: "hook live for another project",
+			amVars: func(root string) map[string]string {
+				return map[string]string{"AGENTMOD_ACTIVE": "1", "AGENTMOD_PROJECT_ROOT": "/elsewhere/proj"}
+			},
+			want:    []string{"routing /elsewhere/proj", liveSwitch},
+			notWant: []string{notActive, liveHere},
+		},
+		{
+			name:    "--no-shell-hook, hook not live",
+			flags:   []string{"--no-shell-hook"},
+			notWant: []string{notActive, "Note: the hook"},
+		},
+		{
+			name:  "--no-shell-hook, hook live for this project",
+			flags: []string{"--no-shell-hook"},
+			amVars: func(root string) map[string]string {
+				return map[string]string{"AGENTMOD_ACTIVE": "1", "AGENTMOD_PROJECT_ROOT": root}
+			},
+			want:    []string{liveHere},
+			notWant: []string{notActive},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root, home := t.TempDir(), t.TempDir()
+			if tc.preBlock {
+				if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte(rcBlockFor("zsh")), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			vars := zshEnv(home)
+			if tc.amVars != nil {
+				for k, v := range tc.amVars(root) {
+					vars[k] = v
+				}
+			}
+			code, stdout, stderr := runInitWithEnv(t, root, vars, tc.flags...)
+			if code != ExitOK {
+				t.Fatalf("exit = %d, want %d; stderr:\n%s", code, ExitOK, stderr)
+			}
+			wantContains(t, "stdout", stdout, tc.want...)
+			for _, w := range tc.notWant {
+				if strings.Contains(stdout, w) {
+					t.Errorf("stdout unexpectedly contains %q\ngot:\n%s", w, stdout)
+				}
+			}
+		})
+	}
+}

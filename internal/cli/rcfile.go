@@ -25,32 +25,76 @@ func rcBlockFor(shell string) string {
 		rcEndMarker + "\n"
 }
 
+// shellHookResult is what ensureShellHook reports back to init: the text
+// for the "Shell hook:" line, the rc action taken (rcInstalled / rcUpdated /
+// rcUnchanged / rcSkipped), and the shell name when one was recognized.
+// hookActivationNotice keys off Action and Shell.
+type shellHookResult struct {
+	Line   string
+	Action string
+	Shell  string
+}
+
 // ensureShellHook installs (or refreshes) the agentmod block in the user's
-// rc file and returns the human-readable status for init's "Shell hook:"
-// line (D019). Conditions that simply mean "nothing to do here" — the flag,
-// an exotic $SHELL, missing $HOME — are reported as skips, not errors; only
-// a damaged fence or an unwritable rc file is an error.
-func ensureShellHook(opts initOptions, env Env) (string, error) {
+// rc file (D019). Conditions that simply mean "nothing to do here" — the
+// flag, an exotic $SHELL, missing $HOME — are reported as skips, not errors;
+// only a damaged fence or an unwritable rc file is an error.
+func ensureShellHook(opts initOptions, env Env) (shellHookResult, error) {
 	if opts.NoShellHook {
-		return "skipped (--no-shell-hook)", nil
+		return shellHookResult{Line: "skipped (--no-shell-hook)", Action: rcSkipped}, nil
 	}
 	shell, rcPath, skip := shellHookTarget(env)
 	if skip != "" {
-		return skip, nil
+		return shellHookResult{Line: skip, Action: rcSkipped}, nil
 	}
 	action, err := ensureRCBlock(rcPath, rcBlockFor(shell))
 	if err != nil {
-		return "", err
+		return shellHookResult{}, err
 	}
+	res := shellHookResult{Action: action, Shell: shell}
 	display := abbrevHome(rcPath, env)
 	switch action {
 	case rcInstalled:
-		return fmt.Sprintf("installed in %s (takes effect in new shells)", display), nil
+		res.Line = fmt.Sprintf("installed in %s (takes effect in new shells)", display)
 	case rcUpdated:
-		return fmt.Sprintf("updated in %s (takes effect in new shells)", display), nil
+		res.Line = fmt.Sprintf("updated in %s (takes effect in new shells)", display)
 	default:
-		return "already installed in " + display, nil
+		res.Line = "already installed in " + display
 	}
+	return res, nil
+}
+
+// hookActivationNotice diagnoses whether the shell hook is routing the
+// shell that invoked init (FABLE_PLAN §12: init cannot change its parent
+// shell's environment and must say so precisely). A live hook exports
+// AGENTMOD_ACTIVE / AGENTMOD_PROJECT_ROOT, which reach init through the
+// injected Env; everything else is inference from the rc-file outcome.
+// An empty result means the "Shell hook:" line already says it all.
+func hookActivationNotice(res shellHookResult, projectRoot string, env Env) string {
+	if v, ok := env.LookupEnv("AGENTMOD_ACTIVE"); ok && v == "1" {
+		root, _ := env.LookupEnv("AGENTMOD_PROJECT_ROOT")
+		if root == projectRoot {
+			return "The shell hook is live in this shell and already routing this project.\n"
+		}
+		return fmt.Sprintf("The shell hook is live in this shell (routing %s).\nIt will switch to this project at your next prompt.\n", root)
+	}
+	if res.Action == rcSkipped {
+		// No hook was installed and none is live; the skip reason on the
+		// "Shell hook:" line already says why and what to do instead.
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Note: the hook is NOT active in this shell session — a process cannot\n")
+	b.WriteString("modify its parent shell's environment. To start routing, either\n")
+	b.WriteString("open a new terminal, run 'exec $SHELL',\n")
+	b.WriteString(fmt.Sprintf("or run: eval \"$(agentmod hook %s)\"   (this shell only, effective immediately)\n", res.Shell))
+	if res.Action != rcInstalled {
+		// The block predates this init run, so the hook may already be
+		// loaded here — it just hasn't seen this project yet (a freshly
+		// created marker is only noticed at the next prompt).
+		b.WriteString("(If the hook is already loaded in this shell, it will pick this project\nup at your next prompt instead.)\n")
+	}
+	return b.String()
 }
 
 // shellHookTarget picks the rc file for the user's login shell. zsh honors
@@ -91,11 +135,13 @@ func shellHookTarget(env Env) (shell, rcPath, skip string) {
 	}
 }
 
-// Actions ensureRCBlock can report.
+// Actions a shellHookResult can carry: the three ensureRCBlock outcomes,
+// plus rcSkipped when no rc file was touched at all.
 const (
 	rcInstalled = "installed"
 	rcUpdated   = "updated"
 	rcUnchanged = "unchanged"
+	rcSkipped   = "skipped"
 )
 
 // ensureRCBlock makes path contain exactly one copy of block, fenced by the

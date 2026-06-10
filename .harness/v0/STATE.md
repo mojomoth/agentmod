@@ -1,7 +1,7 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 4 final slice — install gstack
-distinct error reporting, D033)
+Last updated: 2026-06-11 (iteration: Phase 5 slice 1 — .amod writer +
+`agentmod handoff create`, D034)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
@@ -9,7 +9,8 @@ distinct error reporting, D033)
   first-session diagnosis). Phase 3 COMPLETE (six doctor slices + guard
   claude-bash + guard wiring T17 + auth copy-on-consent T15). Phase 4
   COMPLETE (install gstack clone + --force + pollution verification +
-  distinct error reporting; T18 ✅). Next up: Phase 5 (handoff create).
+  distinct error reporting; T18 ✅). Phase 5 STARTED: slice 1 (.amod
+  writer, T19 🟡) landed; next is the exclusion engine (T20).
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -493,6 +494,47 @@ distinct error reporting, D033)
     ours) + hint-line assertions.
   - Binary smoke in /tmp passed: bogus local source → forwarded fatal line
     + both hint lines, exit 1.
+- `.amod` writer + `agentmod handoff create` LANDED and green (Phase 5
+  slice 1 ✅, D034, T19 🟡): new `internal/handoff` package (Create +
+  Manifest/Inventory/InventoryEntry types, SchemaVersion=1, member-name
+  constants) + `internal/cli/handoff.go` (runHandoff dispatch +
+  runHandoffCreate), wired into dispatcher + usage. Read D034 before
+  touching snapshot code.
+  - Zip layout: manifest.json / inventory.json / checksums.txt at root,
+    payload under `payload/.agentmod/...` (project-root-relative,
+    forward-slash) so later slices add `payload/.claude/...` etc. without
+    a format break. REDACTION/HANDOFF/RESTORE members NOT written yet —
+    separate TASKS items, T19 stays 🟡 until they land.
+  - Payload = all of .agentmod/ EXCEPT snapshots/ (structural: it is the
+    output dir) and the output/temp file itself. NO policy exclusions yet:
+    a slice-1 snapshot MAY contain auth files — the exclusion engine (next
+    task, T20) must land before handoff is described as secret-safe.
+  - Inventory: every non-dir payload member (zip name incl. payload/
+    prefix, size, sha256 of member content, octal mode, symlink_target),
+    sorted; dirs in zip only (empty dirs restore). Symlinks = zip symlink
+    entries whose content IS the target; sha256 is of the target string so
+    hash-checking is uniform. Irregular files (fifo) → hard error.
+    checksums.txt = sha256sum format over manifest/inventory/payload
+    members; `shasum -a 256 -c` verified it in the binary smoke.
+  - Deterministic (all mtimes = CreatedAt; byte-identical re-create
+    tested) and atomic (`.amod-partial-*` temp + rename; failure leaves
+    nothing). Existing output → refuse. Output keeps 0600 (deliberate —
+    snapshots may carry sessions; D034).
+  - `Env` gained `Now func() time.Time` (osEnv = time.Now; fakeEnv = fixed
+    fakeNow 2026-06-11T12:30:45Z in status_test.go). Default output
+    `.agentmod/snapshots/<base>-<utc-stamp>.amod`; nil Now falls back to
+    time.Now. restore/inspect/verify/list subcommands answer "not
+    implemented yet" (exit 1).
+  - Tests: 11 funcs in internal/handoff/handoff_test.go (fixture tree w/
+    exec bit + symlink + empty dir + pre-existing snapshot; member set,
+    manifest fields, inventory↔payload match, zip modes, checksums
+    coverage, determinism, refuse-existing, missing-.agentmod, unreadable
+    leaves-no-partial, fifo refusal incl. mkfifo-shellout helper) + 6 in
+    internal/cli/handoff_test.go (default name w/ fixed clock, --output,
+    same-clock collision refusal, outside-project exit 2, arg-validation
+    table ×8 creating nothing, nil-Now). Binary smoke in /tmp passed:
+    init → create → unzip -l layout → shasum -c OK → refuse-overwrite
+    exit 1, no partial files.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -527,24 +569,28 @@ other two homes and the skills list unchanged; no agentmod artifacts.)
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 5, first item: ".amod writer: zip + manifest + inventory + sha256
-checksums (+ tests)" — `agentmod handoff create`. Before writing any code,
-re-read FABLE_PLAN §17–§20 and IMPLEMENTATION_PLAN §12 (this iteration did
-not; the notes below are carry-overs from earlier iterations, verify them
-against the spec):
-- D028's standing exclusion note: consent-copied auth files
+Phase 5, second item: "default exclusion engine (source, .git,
+node_modules, caches, auth, .env…) (+ tests)" — T20. Re-read FABLE_PLAN
+§18 "Excluded by default" + IMPLEMENTATION_PLAN §12 before coding. Notes:
+- D028's standing list: consent-copied auth files
   (`claude/.credentials.json`, `codex/auth.json`, rel to .agentmod/) MUST
-  be on the T20 default-exclusion list.
-- Reuse `globalOpencodeDataDir`/`globalOpencodeConfigPath` (doctor.go) if
-  handoff exclusions need the global OpenCode paths (noted in D024).
-- Probably a new `internal/handoff` (or similar) package — this is the
-  first command with real product logic beyond cli glue; decide package
-  shape against IMPLEMENTATION_PLAN's architecture section and record it.
-- Slice it: the TASKS item is writer+manifest+inventory+checksums in one
-  line, but exclusion engine / redaction / docs / git-metadata are SEPARATE
-  items — keep the first slice to "pack .agentmod/ honoring nothing fancy,
-  correct zip + manifest + inventory + sha256, tests with fixture trees",
-  and let the exclusion engine slice refine what goes in.
+  be excluded by default. Claude also writes `.credentials.json` itself on
+  login — exclude the NAME, not just the consent-copy provenance.
+- §18 default exclusions: full source code (payload is .agentmod-only
+  already — source only enters via future project-level payload roots),
+  .git, node_modules, build artifacts, caches, tmp, auth, credentials,
+  tokens, .env*, ssh/cloud creds, OS credential store. Sessions stay IN
+  for normal handoffs (excluded only --for-git, Phase 7).
+- Caches inside .agentmod/ concretely: node/npm-cache, node/pnpm,
+  node/bun (routing.Vars targets), plus logs/ stays in for normal
+  handoffs per IMPLEMENTATION_PLAN §12 ("logs only for --for-git").
+- Shape: an exclusion-rule list living in internal/handoff (the future
+  redaction report must explain WHY each exclusion happened — design the
+  rule type with a human-readable reason now so the REDACTION.md slice
+  just renders it). Wire into the writeSnapshot walk; excluded entries
+  should be RECORDED (path + rule) in the Result for that report.
+- The hard-hit refusal (`--allow-findings`, private keys) belongs to the
+  redaction/secret-scan slice, not this one.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

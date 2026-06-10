@@ -36,6 +36,10 @@ func makeProject(t *testing.T, cfg config.Config) string {
 // snapshots stay byte-identical across runs.
 const fakeBinPath = "/fake/bin/agentmod"
 
+// fakeNow is fakeEnv's fixed clock, so timestamped output (handoff create's
+// default snapshot name and manifest) is deterministic under test.
+var fakeNow = time.Date(2026, 6, 11, 12, 30, 45, 0, time.UTC)
+
 // fakeEnv returns an Env reporting cwd as the working directory and vars as
 // the entire environment.
 func fakeEnv(cwd string, vars map[string]string) Env {
@@ -46,6 +50,7 @@ func fakeEnv(cwd string, vars map[string]string) Env {
 			return v, ok
 		},
 		Executable: func() (string, error) { return fakeBinPath, nil },
+		Now:        func() time.Time { return fakeNow },
 	}
 }
 

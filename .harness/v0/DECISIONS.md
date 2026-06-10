@@ -691,3 +691,64 @@ diagnosed and tested.
   A read-only-dir MkdirAll variant was considered and skipped: it needs a
   root-skip guard and proves the same passthrough.
 - Phase 4 is COMPLETE with this slice; T18 ✅.
+
+## D034 — 2026-06-11 — .amod writer shape (Phase 5 slice 1)
+
+`agentmod handoff create` landed as new package `internal/handoff`
+(IMPLEMENTATION_PLAN §3 architecture) + thin glue `internal/cli/handoff.go`.
+Read this before touching snapshot code; later Phase 5/6 slices build on
+every choice here.
+
+- **Zip member layout** (IMPLEMENTATION_PLAN §12): `manifest.json`,
+  `inventory.json`, `checksums.txt` at the root, payload under
+  `payload/<project-root-relative path>` with forward slashes — i.e.
+  `payload/.agentmod/...`. The prefix leaves room for the §12 project-level
+  members (`payload/.claude/...`, MCP config) without a format break, and
+  restore maps members onto the project root directly.
+  REDACTION.md / HANDOFF.md / RESTORE.md are NOT written yet — they are
+  their own TASKS items; T19 stays 🟡 until they exist.
+- **Scope of slice 1:** payload = everything under `.agentmod/` except
+  `.agentmod/snapshots/`. That one exclusion is STRUCTURAL, not policy:
+  snapshots/ is the default output dir, so packing it would nest prior
+  snapshots (and the in-progress temp file) inside the new one. The walk
+  also skips the output/temp file by absolute path in case `--output`
+  points elsewhere inside `.agentmod/`. The POLICY exclusion engine (auth
+  incl. D028's consent-copied paths, caches, .env, …) is the next task —
+  until it lands, a snapshot MAY contain auth files; do not ship/describe
+  handoff as secret-safe before that slice.
+- **Manifest v1 fields:** schema_version=1, created_at (RFC3339 UTC),
+  agentmod_version, platform ("GOOS/GOARCH"; cli maps empty injected GOOS
+  to "unknown"). Git metadata + policy flags are later Phase 5 slices —
+  they EXTEND Manifest; restore must tolerate their absence.
+- **Inventory:** every non-directory payload member: zip member name
+  (incl. `payload/` prefix — unambiguous join key), size, sha256 of the
+  member content, mode as 4-digit octal permission string, and
+  symlink_target for symlinks. Sorted by path. Directories appear in the
+  zip (empty dirs must restore) but not in the inventory.
+- **Symlinks** are stored as zip symlink entries (mode bit + target as
+  content, the archive/zip convention); the sha256 is of the TARGET STRING,
+  so "every content-bearing member hashes to its inventory/checksums entry"
+  holds uniformly for verify. Targets are recorded verbatim — validation
+  (escape-the-payload checks) is restore's job per §21, where the security
+  boundary is. Irregular files (fifo/socket/device) are a hard create-time
+  error naming the path.
+- **checksums.txt** is sha256sum format (`<hex>  <name>`) covering
+  manifest.json, inventory.json, then payload members in path order; it
+  cannot list itself. Verified compatible with `shasum -a 256 -c` in the
+  binary smoke.
+- **Determinism + atomicity:** all zip mtimes = CreatedAt (injected);
+  identical input tree + CreatedAt ⇒ byte-identical .amod (tested). Output
+  is written to a `.amod-partial-*` temp sibling and renamed in; failures
+  remove the temp. Existing output → refuse (no overwrite, D013 pattern).
+  The file keeps CreateTemp's 0600 mode DELIBERATELY: snapshots may carry
+  sessions/working context, so restrictive perms are the right default.
+- **Clock injection:** cli `Env` gained `Now func() time.Time` (osEnv =
+  time.Now; fakeEnv = fixed `fakeNow` 2026-06-11T12:30:45Z). Default output
+  name `<base(projectRoot)>-<UTC yyyymmdd-hhmmss>.amod` under snapshots/ —
+  with the fixed fake clock a second default-name create collides and must
+  refuse (tested; also a real two-creates-in-one-second behavior).
+  Nil Now falls back to time.Now (field optional by contract, tested).
+- **CLI surface:** `handoff create [--output PATH]`; restore/inspect/
+  verify/list answer "not implemented yet" (exit 1) so they read as
+  planned, not mistyped; unknown subcommand/flags rejected before any FS
+  work (tested). Outside a project → exit 2 naming 'agentmod init'.

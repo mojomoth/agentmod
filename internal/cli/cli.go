@@ -43,6 +43,11 @@ Commands:
              (install gstack clones into .agentmod/claude/skills/gstack;
               --force replaces an existing project-local install;
               the global ~/.claude/skills is never touched)
+  handoff    snapshot this project's agent environment
+             (handoff create [--output PATH] packs .agentmod/ into a .amod
+              zip with manifest, inventory, and sha256 checksums; default
+              output is .agentmod/snapshots/<project>-<timestamp>.amod;
+              restore/inspect/verify/list are not implemented yet)
   version    print version and exit
   help       show this help
 
@@ -79,6 +84,8 @@ func run(args []string, stdout, stderr io.Writer, env Env) int {
 		return runGuard(args[1:], stdout, stderr, env)
 	case "install":
 		return runInstall(args[1:], stdout, stderr, env)
+	case "handoff":
+		return runHandoff(args[1:], stdout, stderr, env)
 	case "version", "--version":
 		fmt.Fprintf(stdout, "agentmod %s\n", Version)
 		return ExitOK

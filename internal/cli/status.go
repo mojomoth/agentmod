@@ -24,17 +24,20 @@ import (
 // (consumed by `guard claude-bash`); fakes leave it nil (treated as empty)
 // unless a test sets it. Executable resolves the running agentmod binary's
 // absolute path (consumed by init's guard wiring); fakes return a fixed
-// fake path so wiring is exercised without a real binary.
+// fake path so wiring is exercised without a real binary. Now is the clock
+// (consumed by handoff create for the manifest timestamp and default
+// snapshot name); fakes return a fixed instant so output is deterministic.
 type Env struct {
 	Getwd      func() (string, error)
 	LookupEnv  func(key string) (string, bool)
 	GOOS       string
 	Stdin      io.Reader
 	Executable func() (string, error)
+	Now        func() time.Time
 }
 
 func osEnv() Env {
-	return Env{Getwd: os.Getwd, LookupEnv: os.LookupEnv, GOOS: runtime.GOOS, Stdin: os.Stdin, Executable: os.Executable}
+	return Env{Getwd: os.Getwd, LookupEnv: os.LookupEnv, GOOS: runtime.GOOS, Stdin: os.Stdin, Executable: os.Executable, Now: time.Now}
 }
 
 // runStatus implements `agentmod status` (FABLE_PLAN §24): a brief report of

@@ -53,7 +53,10 @@ Add/split items freely; keep units small.
        git-missing via crippled real PATH; ENOTDIR fault injection)
 
 ## Phase 5 — handoff create
-- [ ] .amod writer: zip + manifest + inventory + sha256 checksums (+ tests)
+- [x] .amod writer: zip + manifest + inventory + sha256 checksums (+ tests)
+      (D034: internal/handoff package + `handoff create [--output]`;
+       snapshots/ structurally excluded; REDACTION/HANDOFF/RESTORE members
+       and all policy exclusions are the items below)
 - [ ] default exclusion engine (source, .git, node_modules, caches, auth, .env…) (+ tests)
 - [ ] redaction report + secret-candidate scan (+ tests)
 - [ ] HANDOFF + RESTORE human docs generation (+ tests)

@@ -25,6 +25,7 @@ Usage:
   agentmod <command> [arguments]
 
 Commands:
+  status     show whether AgentMod is active here and where agent homes route
   version    print version and exit
   help       show this help
 
@@ -36,11 +37,19 @@ Flags:
 // the process exit code. All output goes to the supplied writers so tests
 // can capture it.
 func Run(args []string, stdout, stderr io.Writer) int {
+	return run(args, stdout, stderr, osEnv())
+}
+
+// run is Run with the process environment injected, so tests control cwd and
+// env lookups without touching real process state.
+func run(args []string, stdout, stderr io.Writer, env Env) int {
 	if len(args) == 0 {
 		fmt.Fprint(stdout, usage)
 		return ExitOK
 	}
 	switch args[0] {
+	case "status":
+		return runStatus(args[1:], stdout, stderr, env)
 	case "version", "--version":
 		fmt.Fprintf(stdout, "agentmod %s\n", Version)
 		return ExitOK

@@ -17,7 +17,7 @@ Add/split items freely; keep units small.
 - [x] go.mod + main.go + subcommand dispatcher + `--version`
 - [x] internal/project: upward discovery of .agentmod/agentmod.toml (+ tests)
 - [x] internal/config: TOML schema, defaults per FABLE_PLAN §13, validation (+ tests)
-- [ ] `agentmod status` active/inactive output (+ tests)
+- [x] `agentmod status` active/inactive output (+ tests)
 
 ## Phase 2 — init + hooks
 - [ ] init: .agentmod/ layout + agentmod.toml writer (+ tests)

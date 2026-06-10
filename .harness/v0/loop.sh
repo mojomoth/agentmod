@@ -8,13 +8,18 @@
 #   AGENTMOD_LOOP_PERM_ARGS    permission args (default: --dangerously-skip-permissions;
 #                              guardrails live in .claude/settings.json PreToolUse hooks)
 #   AGENTMOD_LOOP_EXTRA_ARGS   extra claude args (e.g. --model)
+#   AGENTMOD_LOOP_MAX_RATELIMIT_SLEEPS  max 15-min sleeps while rate-limited
+#                              before giving up (default 48 = 12h)
 #
 # Stop conditions:
 #   1. .harness/v0/DONE.md contains a line `STATUS: DONE`
 #      AND `go test ./...` passes (a DONE claim with failing tests is
 #      rewritten to STATUS: REJECTED and the loop continues).
 #   2. Max iterations reached.
-# Never loops unboundedly.
+#   3. Rate-limited beyond the sleep budget.
+# Never loops unboundedly. A rate-limited attempt (claude exits immediately
+# with a session/usage-limit message) does NOT consume an iteration; the loop
+# sleeps 15 minutes and retries the same iteration.
 
 set -uo pipefail
 
@@ -25,6 +30,7 @@ MAX_ITERS="${AGENTMOD_LOOP_MAX_ITERS:-25}"
 CLAUDE_BIN="${AGENTMOD_LOOP_CLAUDE_BIN:-claude}"
 PERM_ARGS="${AGENTMOD_LOOP_PERM_ARGS:---dangerously-skip-permissions}"
 EXTRA_ARGS="${AGENTMOD_LOOP_EXTRA_ARGS:-}"
+MAX_RATELIMIT_SLEEPS="${AGENTMOD_LOOP_MAX_RATELIMIT_SLEEPS:-48}"
 
 mkdir -p "$REPORTS"
 
@@ -57,8 +63,9 @@ check_done() {
 # Allow a pre-declared DONE to stop before burning an iteration.
 if check_done; then exit 0; fi
 
-for i in $(seq 1 "$MAX_ITERS"); do
-  n="$(printf 'iter-%03d' "$i")"
+i=1
+ratelimit_sleeps=0
+while [ "$i" -le "$MAX_ITERS" ]; do
   # Find the next unused report slot so re-runs don't clobber old logs.
   slot=1
   while [ -e "$REPORTS/$(printf 'iter-%03d' "$slot").log" ]; do slot=$((slot + 1)); done
@@ -71,7 +78,26 @@ for i in $(seq 1 "$MAX_ITERS"); do
   rc=${PIPESTATUS[0]}
   echo "[loop] iteration exit code: $rc" | tee -a "$log"
 
+  # Rate-limit detection: claude bailed immediately with a limit message.
+  # The size guard avoids misreading a real iteration that merely mentions
+  # the words "rate limit" in its work output.
+  if [ "$rc" -ne 0 ] \
+     && [ "$(wc -c < "$log")" -lt 2000 ] \
+     && grep -qiE 'session limit|usage limit|rate limit' "$log"; then
+    ratelimit_sleeps=$((ratelimit_sleeps + 1))
+    if [ "$ratelimit_sleeps" -gt "$MAX_RATELIMIT_SLEEPS" ]; then
+      echo "[loop] Rate-limited for more than $MAX_RATELIMIT_SLEEPS sleep periods; giving up."
+      exit 1
+    fi
+    echo "[loop] Rate-limited (sleep $ratelimit_sleeps/$MAX_RATELIMIT_SLEEPS). Sleeping 15m, then retrying iteration $i."
+    rm -f "$log"   # a no-op attempt; don't leave a garbage log or consume the slot
+    sleep 900
+    continue       # iteration counter NOT incremented
+  fi
+  ratelimit_sleeps=0
+
   if check_done; then exit 0; fi
+  i=$((i + 1))
 done
 
 echo "[loop] Max iterations ($MAX_ITERS) reached without a verified DONE. Inspect $H/STATE.md and reports/."

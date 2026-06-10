@@ -22,8 +22,13 @@ The dev process must never touch global agent state:
 # Mtimes of global homes must not change due to our work this iteration.
 ls -ldT ~/.claude ~/.codex ~/.config/opencode 2>/dev/null
 # No agentmod-created files in global homes:
-ls ~/.claude/skills 2>/dev/null | grep -i gstack && echo "VIOLATION: gstack in global skills"
+ls ~/.claude/skills 2>/dev/null | grep -i gstack
 ```
+
+Compare BOTH outputs against the baseline in `STATE.md`. The user's own
+pre-existing global gstack install (gstack, gstack-upgrade,
+open-gstack-browser — see D010) is part of the baseline, not a violation;
+only NEW gstack entries or changed mtimes caused by our work are violations.
 
 Compare against the baseline recorded in `STATE.md` (update the baseline only
 when a deliberate, user-approved global change happened — there should be none).

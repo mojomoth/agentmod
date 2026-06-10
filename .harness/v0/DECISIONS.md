@@ -56,3 +56,17 @@ warning).
 ## D008 — 2026-06-10 — Versions observed on this machine
 go 1.26.2 darwin/arm64 · claude 2.1.170 · codex-cli 0.137.0 · opencode 1.4.3.
 Runtime sanity checks in doctor should cite these as the verified baseline.
+
+## D009 — 2026-06-10 — BurntSushi/toml deferred until internal/config
+go.mod ships with zero requires for now: an unused `require` would be
+stripped by `go mod tidy` and adds nothing. The dependency lands together
+with `internal/config` (the first package that decodes TOML). D004 stands —
+it remains the only planned dependency.
+
+## D010 — 2026-06-10 — CHECKS.md §2 gstack grep: pre-existing install is baseline
+`ls ~/.claude/skills | grep -i gstack` matches the developing user's own
+pre-existing global gstack install (gstack, gstack-upgrade,
+open-gstack-browser; global-home mtimes 2026-06-06/-05 and 2026-04-30 all
+predate this repo). That is NOT pollution from this project. The check
+compares against the baseline recorded in STATE.md; only gstack entries that
+APPEAR after baseline are violations.

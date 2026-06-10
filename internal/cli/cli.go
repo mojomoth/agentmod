@@ -39,6 +39,9 @@ Commands:
              hook JSON on stdin and exits 2 with the reason on stderr to
              block global-agent-home writes (--json emits a
              permissionDecision instead); allowed commands exit 0 silently
+  install    install a managed component into this project only
+             (install gstack clones into .agentmod/claude/skills/gstack;
+              the global ~/.claude/skills is never touched)
   version    print version and exit
   help       show this help
 
@@ -73,6 +76,8 @@ func run(args []string, stdout, stderr io.Writer, env Env) int {
 		return runHook(args[1:], stdout, stderr)
 	case "guard":
 		return runGuard(args[1:], stdout, stderr, env)
+	case "install":
+		return runInstall(args[1:], stdout, stderr, env)
 	case "version", "--version":
 		fmt.Fprintf(stdout, "agentmod %s\n", Version)
 		return ExitOK

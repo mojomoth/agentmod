@@ -1,14 +1,15 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 3 — doctor Claude-guard wiring
-finding; Phase 3 COMPLETE)
+Last updated: 2026-06-11 (iteration: Phase 4 slice 1 — install gstack
+happy-path clone)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
   both shell hooks + rc editor + env-hygiene integration tests + the
   first-session diagnosis). Phase 3 COMPLETE (six doctor slices + guard
-  claude-bash + guard wiring T17 + auth copy-on-consent T15). Next: Phase 4
-  (gstack installer).
+  claude-bash + guard wiring T17 + auth copy-on-consent T15). Phase 4
+  STARTED: install gstack clone landed; remaining: --force, pollution
+  verification, error-reporting tests.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -398,6 +399,35 @@ finding; Phase 3 COMPLETE)
     them), matching init's guarantee; layout tests deleting claude/ moved
     to os.RemoveAll. 5 new test funcs + AllHealthy/fresh-machine
     assertions extended.
+- `agentmod install gstack` LANDED and green (Phase 4 slice 1 ✅, D030, T18
+  🟡): new `internal/cli/install.go` (runInstall + installGstack), wired
+  into dispatcher + usage. Read D030 before touching installer code.
+  - Lives in internal/cli, NOT internal/installer (D030: needs
+    gstackRelProject/exit codes/Env — single consumer, no new package).
+  - Flow: require project (ErrNotFound → exit 2 naming 'agentmod init');
+    target = agentmodDir/gstackRelProject (REUSED from doctor.go per D025);
+    Lstat-exists → "already installed … remove that directory to reinstall"
+    exit 1 (never clobber; --force is the NEXT slice and is currently
+    rejected by arg validation); git via real exec.LookPath (documented:
+    install EXECUTES git, unlike doctor's injected-Env statBinaryOnPath);
+    clone source = AGENTMOD_GSTACK_SOURCE via env.LookupEnv if set, else
+    https://github.com/garrytan/gstack; MkdirAll skills dir → MkdirTemp
+    sibling ".gstack-clone-*" → `git clone -- <src> <tmp>` with
+    GIT_TERMINAL_PROMPT=0 → os.Rename onto target (atomic, same fs);
+    deferred RemoveAll cleans temp on failure. `.git` kept in the clone.
+  - 5 test funcs in install_test.go (fixture repo via local `git init` +
+    commit with GIT_CONFIG_GLOBAL/SYSTEM masked to os.DevNull + identity
+    flags, t.Skip without git): clone happy path (SKILL.md bytes, .git dir,
+    stdout lines, no temp leftovers), outside-project exit 2,
+    already-installed abort with sentinel-file untouched, clone-failure
+    cleanup (no target, empty skills dir), arg-validation table ×3 proving
+    nothing is created before validation passes. Helpers
+    `makeGstackFixtureRepo`/`runGitFixture` — reuse for the remaining
+    Phase 4 slices and T30 scenarios.
+  - Binary smoke in /tmp passed: install → doctor "gstack (project):
+    installed" ok line → second run aborts exit 1. (Doctor's global-gstack
+    warn fired on the dev machine's own pre-existing install — D010,
+    expected, not a violation.)
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -432,23 +462,22 @@ other two homes and the skills list unchanged; no agentmod artifacts.)
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 4, first item: "install gstack: clone to .agentmod/claude/skills/gstack
-only (+ fixture-repo tests)" (TASKS.md Phase 4 top unchecked). Before
-writing code:
-- Read FABLE_PLAN §16 (gstack install spec) + IMPLEMENTATION_PLAN's gstack
-  section + D025 (gstack doctor findings). The destination constant is
-  `gstackRelProject` in doctor.go (claude/skills/gstack rel to .agentmod/) —
-  REUSE it, do not respell the path; gstackRelGlobal is the global path the
-  installer must never write.
-- This is the first command that EXECUTES a foreign binary (git). Tests
-  must not need network: clone from a local fixture repo (git init + commit
-  in a temp dir — running `git` in tests is fine, it's on every dev
-  machine; guard against PATH-injection by using exec.LookPath semantics
-  consistent with injected Env, or document why real exec is used here
-  unlike statBinaryOnPath).
-- Outside-project failure, already-installed abort, --force, and
-  global-pollution verification are SEPARATE Phase 4 items — keep this
-  iteration to the happy-path clone + tests if scope grows.
+Phase 4, second item: "outside-project failure; already-installed abort;
+--force (+ tests)". The first two halves ALREADY LANDED with slice 1 (see
+D030 — they were inherent to a safe happy path), so this item now means:
+- Add `--force` to runInstall's arg parsing (currently any extra arg is
+  rejected — TestInstallArgValidation's "extra args" case uses `--force`
+  as its fixture and MUST be updated to expect acceptance).
+- --force semantics per IMPLEMENTATION_PLAN §10: replaces ONLY the
+  project-local copy. Safe order: clone to temp FIRST, then swap (rename
+  old aside / RemoveAll after successful rename) so a failed clone never
+  destroys the existing install — decide and record in D030 or a new D.
+- Tests: --force over existing install (sentinel file gone, new content
+  present), --force when nothing installed (plain install), failed --force
+  clone leaves the old install intact, `install gstack --force extra` still
+  rejected. Reuse makeGstackFixtureRepo/runGitFixture.
+- Item 3 (global before/after pollution verification + abort) and item 4
+  (distinct no-git/network/setup error reporting) stay separate iterations.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

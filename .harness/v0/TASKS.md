@@ -43,8 +43,10 @@ Add/split items freely; keep units small.
 - [x] doctor: guard hook wired / stale-binary-path finding in claude/settings.json (+ tests)
 
 ## Phase 4 — gstack
-- [ ] install gstack: clone to .agentmod/claude/skills/gstack only (+ fixture-repo tests)
+- [x] install gstack: clone to .agentmod/claude/skills/gstack only (+ fixture-repo tests)
 - [ ] outside-project failure; already-installed abort; --force (+ tests)
+      (basic outside-project exit-2 + already-installed abort LANDED with the
+       clone task — this item now = --force flag + hardening tests)
 - [ ] global before/after pollution verification + abort path (+ tests)
 - [ ] error reporting: no git, network failure, setup failure (+ tests)
 

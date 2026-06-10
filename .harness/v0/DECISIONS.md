@@ -562,3 +562,35 @@ routed, so neither leak exists). Broken config = defaults (enabled, partial).
   settings.json for fakeBinPath (`writeGuardSettings` helper), matching
   init's guarantee — same precedent as the opencode stub in D023. Layout
   tests deleting claude/ moved from os.Remove to os.RemoveAll.
+
+## D030 — 2026-06-11 — install gstack: happy-path clone (Phase 4 slice 1)
+(read with D025 — doctor's gstack findings name this command as the remedy)
+- **Lives in internal/cli (install.go), not internal/installer**:
+  IMPLEMENTATION_PLAN §6 sketched a separate package, but the installer
+  needs gstackRelProject (doctor.go, D025: single source for the path),
+  project discovery, Env injection, and the cli exit codes — a separate
+  package would force exporting all of those for one consumer. Deviation
+  recorded here; revisit only if a second installer component appears.
+- **Source override via AGENTMOD_GSTACK_SOURCE** (read through injected
+  Env.LookupEnv): tests clone from a local fixture repo (git init+commit in
+  a temp dir) so no test touches the network; doubles as a mirror/fork
+  escape hatch. Default stays the hardcoded
+  https://github.com/garrytan/gstack (§3.4 verified fact).
+- **Real exec.LookPath/exec.Command for git**, unlike doctor's
+  statBinaryOnPath (which honors injected Env because it only REPORTS):
+  install actually executes git, and the child inherits the real process
+  environment anyway — pretending otherwise via injected PATH would be
+  false isolation. Documented in install.go. GIT_TERMINAL_PROMPT=0 is set
+  so a credential prompt can never hang the command.
+- **Atomicity**: clone into os.MkdirTemp(skillsDir, ".gstack-clone-") —
+  sibling of the target, same filesystem — then os.Rename onto
+  claude/skills/gstack; deferred RemoveAll cleans the temp dir on any
+  failure. The target either doesn't exist or is a complete clone. `.git`
+  is kept (enables later updates; handoff exclusions strip it in Phase 5).
+- **Scope landed early**: outside-project → exit 2 (the command cannot even
+  locate a destination without a project) and already-installed → abort
+  exit 1 (never clobber) are inherent to a safe happy path, so they landed
+  now WITH tests; the Phase 4 item 2 that names them now means --force +
+  any hardening. gstack's own setup script is never run (§16) — clone only.
+- **No flags yet**: `--force` rejected ("takes no further arguments") until
+  its slice lands; argument validation happens before any FS work (tested).

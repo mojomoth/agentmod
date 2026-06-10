@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/agentmod/agentmod/internal/config"
@@ -78,6 +80,7 @@ func runDoctor(args []string, stdout, stderr io.Writer, env Env) int {
 		}
 		findings = append(findings, layoutFinding(proj.AgentmodDir))
 		findings = append(findings, agentHomeFindings(proj, cfg, cfgOK)...)
+		findings = append(findings, opencodeIsolationFindings(cfg, cfgOK, env)...)
 		findings = append(findings, shimFinding(proj.AgentmodDir))
 	}
 	findings = append(findings, agentBinariesFinding(env))
@@ -226,6 +229,129 @@ func opencodeConfigFinding(agentmodDir string, enabled bool) finding {
 		return finding{diagError, "OpenCode config", path + " is not a regular file — move it aside and re-run 'agentmod init'"}
 	}
 	return finding{diagWarn, "OpenCode config", path + " missing — re-run 'agentmod init' to recreate it"}
+}
+
+// Global OpenCode locations (FABLE_PLAN §3.3, verified): sessions, storage,
+// and auth.json live under ${XDG_DATA_HOME:-~/.local/share}/opencode; the
+// config merge chain starts at ${XDG_CONFIG_HOME:-~/.config}/opencode/opencode.json.
+func globalOpencodeDataDir(env Env) string {
+	if base, ok := env.LookupEnv("XDG_DATA_HOME"); ok && base != "" {
+		return filepath.Join(base, "opencode")
+	}
+	if home, ok := env.LookupEnv("HOME"); ok && home != "" {
+		return filepath.Join(home, ".local", "share", "opencode")
+	}
+	return ""
+}
+
+func globalOpencodeConfigPath(env Env) string {
+	if base, ok := env.LookupEnv("XDG_CONFIG_HOME"); ok && base != "" {
+		return filepath.Join(base, "opencode", "opencode.json")
+	}
+	if home, ok := env.LookupEnv("HOME"); ok && home != "" {
+		return filepath.Join(home, ".config", "opencode", "opencode.json")
+	}
+	return ""
+}
+
+// opencodeIsolationFindings covers the two §15.3 leak subjects: sessions
+// staying global in partial-isolation mode, and the global opencode.json
+// merge chain. Both are moot when opencode routing is disabled, and both are
+// resolved by the XDG full-isolation opt-in (XDG_CONFIG_HOME/XDG_DATA_HOME
+// are then routed into the project while inside it). A broken config (cfgOK
+// false) is treated as the defaults: opencode enabled, partial mode.
+func opencodeIsolationFindings(cfg config.Config, cfgOK bool, env Env) []finding {
+	if cfgOK && !cfg.OpenCode.Enabled {
+		return nil
+	}
+	if cfgOK && cfg.OpenCode.XDGFullIsolation {
+		return []finding{
+			{diagOK, "OpenCode sessions", "routed into the project while inside it (opencode.xdg_full_isolation = true)"},
+			{diagOK, "OpenCode merge chain", "global config is not merged while routing is active (opencode.xdg_full_isolation = true)"},
+		}
+	}
+	return []finding{opencodeSessionsFinding(env), opencodeMergeFinding(env)}
+}
+
+// opencodeSessionsFinding is the §15.3 partial-isolation warning. It warns
+// only when the global data dir exists — i.e. OpenCode is actually in use
+// and sessions ARE accumulating outside the project (D024); on a machine
+// that has never run OpenCode the same limitation is stated at ok level so
+// a fresh default-config project still exits 0.
+func opencodeSessionsFinding(env Env) finding {
+	dir := globalOpencodeDataDir(env)
+	limitation := "partial-isolation mode keeps OpenCode sessions, storage, and auth in the global data dir"
+	remedy := "set opencode.xdg_full_isolation = true in .agentmod/agentmod.toml for full isolation"
+	if dir == "" {
+		return finding{diagOK, "OpenCode sessions", fmt.Sprintf(
+			"cannot locate the global data dir (HOME and XDG_DATA_HOME unset); %s — %s", limitation, remedy)}
+	}
+	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		return finding{diagWarn, "OpenCode sessions", fmt.Sprintf(
+			"not project-isolated: %s (%s) — %s", limitation, dir, remedy)}
+	}
+	return finding{diagOK, "OpenCode sessions", fmt.Sprintf(
+		"%s (%s; nothing stored there yet) — %s", limitation, dir, remedy)}
+}
+
+// opencodeMergeFinding is §23's "OpenCode global config/plugins leaking into
+// the project view": in partial mode the global opencode.json is still first
+// in the merge chain, so it warns when that file carries any setting (any
+// top-level key besides $schema). Unreadable or unparseable content warns
+// too — OpenCode may still merge it (the format tolerates JSONC), and doctor
+// cannot prove it leaks nothing.
+func opencodeMergeFinding(env Env) finding {
+	path := globalOpencodeConfigPath(env)
+	if path == "" {
+		return finding{diagOK, "OpenCode merge chain",
+			"cannot locate the global config (HOME and XDG_CONFIG_HOME unset); nothing known to merge into the project view"}
+	}
+	info, err := os.Stat(path)
+	switch {
+	case os.IsNotExist(err):
+		return finding{diagOK, "OpenCode merge chain", "no global config at " + path + "; nothing leaks into the project view"}
+	case err != nil:
+		return finding{diagWarn, "OpenCode merge chain", fmt.Sprintf(
+			"cannot inspect the global config %s (%v) — it is merged into the project view; review it manually", path, err)}
+	case !info.Mode().IsRegular():
+		return finding{diagWarn, "OpenCode merge chain", path + " is not a regular file — cannot tell what it merges into the project view"}
+	}
+	keys, err := opencodeConfigKeys(path)
+	switch {
+	case err != nil:
+		return finding{diagWarn, "OpenCode merge chain", fmt.Sprintf(
+			"global %s could not be parsed (%v) — it is merged into the project view and may leak settings; review it manually or set opencode.xdg_full_isolation = true", path, err)}
+	case len(keys) > 0:
+		return finding{diagWarn, "OpenCode merge chain", fmt.Sprintf(
+			"global %s is merged into the project view and will leak: %s — remove or trim those settings, or set opencode.xdg_full_isolation = true", path, strings.Join(keys, ", "))}
+	}
+	return finding{diagOK, "OpenCode merge chain", "global " + path + " carries no settings (nothing leaks into the project view)"}
+}
+
+// opencodeConfigKeys returns the sorted top-level keys of a JSON object
+// file, minus $schema (metadata that changes no behavior). A top-level
+// non-object is reported as an error: whatever it is, doctor cannot vouch
+// for what OpenCode does with it.
+func opencodeConfigKeys(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return nil, nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return nil, err
+	}
+	var keys []string
+	for k := range obj {
+		if k != "$schema" {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	return keys, nil
 }
 
 // agentBinariesFinding reports which agent CLIs are reachable (§23 "Claude /

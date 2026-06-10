@@ -97,6 +97,8 @@ func TestDoctorAllHealthy(t *testing.T) {
 	wantLevel(t, findingLine(t, stdout, "Claude home"), diagOK)
 	wantLevel(t, findingLine(t, stdout, "Codex home"), diagOK)
 	wantLevel(t, findingLine(t, stdout, "OpenCode config"), diagOK)
+	wantLevel(t, findingLine(t, stdout, "OpenCode sessions"), diagOK)
+	wantLevel(t, findingLine(t, stdout, "OpenCode merge chain"), diagOK)
 	wantLevel(t, findingLine(t, stdout, "Agent binaries"), diagOK)
 	wantContains(t, "Project line", findingLine(t, stdout, "Project"), root, filepath.Join(root, ".agentmod"))
 	wantContains(t, "Routing line", findingLine(t, stdout, "Routing env"), "applied for this project")
@@ -667,6 +669,194 @@ func TestDoctorAgentBinariesOnPath(t *testing.T) {
 		"codex not found on PATH",
 		"opencode not found on PATH",
 	)
+}
+
+// wantNoFinding asserts doctor printed no line for a label (used for
+// findings that must be skipped entirely, not reported at ok level).
+func wantNoFinding(t *testing.T, stdout, label string) {
+	t.Helper()
+	if strings.Contains(stdout, "  "+label+": ") {
+		t.Errorf("unexpected %q finding in doctor output:\n%s", label, stdout)
+	}
+}
+
+// writeGlobalOpencodeConfig plants a global opencode.json under home's XDG
+// default config dir and returns its path. Content must be obviously fake.
+func writeGlobalOpencodeConfig(t *testing.T, home, content string) string {
+	t.Helper()
+	dir := filepath.Join(home, ".config", "opencode")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "opencode.json")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestDoctorOpenCodeSessionsWarnWhenGlobalDataDirExists(t *testing.T) {
+	// Partial mode + an existing global data dir = sessions ARE accumulating
+	// outside the project (§15.3) → warn with the opt-in remedy (D024).
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	vars := healthyVars(t, root)
+	dataDir := filepath.Join(vars["HOME"], ".local", "share", "opencode")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, vars))
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "OpenCode sessions")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "OpenCode sessions line", line,
+		"not project-isolated", dataDir, "opencode.xdg_full_isolation = true")
+}
+
+func TestDoctorOpenCodeSessionsRespectsXDGDataHome(t *testing.T) {
+	// A user-set XDG_DATA_HOME relocates the global data dir; doctor must
+	// look there, not under HOME's default.
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	vars := healthyVars(t, root)
+	xdgData := t.TempDir()
+	vars["XDG_DATA_HOME"] = xdgData
+	dataDir := filepath.Join(xdgData, "opencode")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, vars))
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "OpenCode sessions")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "OpenCode sessions line", line, dataDir)
+}
+
+func TestDoctorOpenCodeSessionsNoGlobalDataStatesLimitationAtOK(t *testing.T) {
+	// Nothing stored globally yet: the limitation is still stated, but at ok
+	// level so a fresh default-config project exits 0 (D024).
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+	}
+	line := findingLine(t, stdout, "OpenCode sessions")
+	wantLevel(t, line, diagOK)
+	wantContains(t, "OpenCode sessions line", line,
+		"sessions, storage, and auth in the global data dir",
+		"nothing stored there yet", "opencode.xdg_full_isolation = true")
+}
+
+func TestDoctorOpenCodeXDGOptInSuppressesBothWarnings(t *testing.T) {
+	// With full XDG isolation on, sessions and the merge chain are routed
+	// into the project, so neither global fixture may trigger a warning.
+	cfg := config.Default()
+	cfg.OpenCode.XDGFullIsolation = true
+	root := makeProject(t, cfg)
+	mkLayout(t, root)
+	vars := healthyVars(t, root)
+	for _, v := range routing.Vars(filepath.Join(root, ".agentmod"), cfg) {
+		vars[v.Name] = v.Value
+	}
+	if err := os.MkdirAll(filepath.Join(vars["HOME"], ".local", "share", "opencode"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeGlobalOpencodeConfig(t, vars["HOME"], `{"model": "fake-model", "plugin": ["fake-plugin"]}`)
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, vars))
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+	}
+	sessions := findingLine(t, stdout, "OpenCode sessions")
+	wantLevel(t, sessions, diagOK)
+	wantContains(t, "OpenCode sessions line", sessions, "opencode.xdg_full_isolation = true")
+	merge := findingLine(t, stdout, "OpenCode merge chain")
+	wantLevel(t, merge, diagOK)
+	wantContains(t, "OpenCode merge chain line", merge, "not merged", "opencode.xdg_full_isolation = true")
+}
+
+func TestDoctorOpenCodeMergeChainWarnsOnGlobalConfig(t *testing.T) {
+	// A global opencode.json carrying real settings leaks into the project
+	// view via the merge chain (§23) → warn naming the leaking keys.
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	vars := healthyVars(t, root)
+	path := writeGlobalOpencodeConfig(t, vars["HOME"],
+		`{"$schema": "https://opencode.ai/config.json", "model": "fake-model", "plugin": ["fake-plugin"]}`)
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, vars))
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "OpenCode merge chain")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "OpenCode merge chain line", line,
+		path, "will leak: model, plugin", "opencode.xdg_full_isolation = true")
+	if strings.Contains(line, "$schema") {
+		t.Errorf("$schema must not be reported as leaking:\n%s", line)
+	}
+}
+
+func TestDoctorOpenCodeMergeChainTrivialGlobalConfigIsOK(t *testing.T) {
+	// $schema-only, empty-object, and empty-file global configs change no
+	// behavior — nothing leaks, stay ok.
+	for name, content := range map[string]string{
+		"schema-only": `{"$schema": "https://opencode.ai/config.json"}`,
+		"empty-obj":   "{}\n",
+		"empty-file":  "",
+	} {
+		root := makeProject(t, config.Default())
+		mkLayout(t, root)
+		vars := healthyVars(t, root)
+		writeGlobalOpencodeConfig(t, vars["HOME"], content)
+		code, stdout, _ := runDoctorForTest(t, fakeEnv(root, vars))
+		if code != ExitOK {
+			t.Fatalf("%s: exit = %d, want %d\n%s", name, code, ExitOK, stdout)
+		}
+		line := findingLine(t, stdout, "OpenCode merge chain")
+		wantLevel(t, line, diagOK)
+		wantContains(t, name+" merge line", line, "no settings")
+	}
+}
+
+func TestDoctorOpenCodeMergeChainUnparseableGlobalConfigWarns(t *testing.T) {
+	// Doctor cannot prove an unparseable (e.g. JSONC) global config leaks
+	// nothing, and OpenCode may still merge it → conservative warn.
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	vars := healthyVars(t, root)
+	path := writeGlobalOpencodeConfig(t, vars["HOME"], "// jsonc comment\n{\"model\": \"fake-model\"}\n")
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, vars))
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "OpenCode merge chain")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "OpenCode merge chain line", line, path, "could not be parsed")
+}
+
+func TestDoctorOpenCodeDisabledSkipsIsolationFindings(t *testing.T) {
+	// opencode.enabled = false: routing never points at OpenCode, so both
+	// §15.3 findings are moot and must not appear at all.
+	cfg := config.Default()
+	cfg.OpenCode.Enabled = false
+	root := makeProject(t, cfg)
+	mkLayout(t, root)
+	vars := healthyVars(t, root)
+	if err := os.MkdirAll(filepath.Join(vars["HOME"], ".local", "share", "opencode"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeGlobalOpencodeConfig(t, vars["HOME"], `{"model": "fake-model"}`)
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, vars))
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+	}
+	wantNoFinding(t, stdout, "OpenCode sessions")
+	wantNoFinding(t, stdout, "OpenCode merge chain")
+	wantContains(t, "OpenCode config line", findingLine(t, stdout, "OpenCode config"), "routing disabled")
 }
 
 func TestDoctorRejectsArgs(t *testing.T) {

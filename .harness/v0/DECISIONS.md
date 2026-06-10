@@ -354,3 +354,32 @@ Three §23 subjects added (read with D021/D022; exit semantics unchanged):
   stat-only PATH walk (`statBinaryOnPath`: executable regular file;
   exec.LookPath unusable — reads the real PATH, not the injected Env's).
   Always ok-level: not every project uses all three agents.
+
+## D024 — 2026-06-11 — doctor slice 4: OpenCode §15.3 isolation findings
+Two inside-project findings (read with D021–D023; exit semantics unchanged),
+both skipped entirely when `opencode.enabled = false` (no line printed), both
+collapsed to ok when `opencode.xdg_full_isolation = true` (XDG roots are then
+routed, so neither leak exists). Broken config = defaults (enabled, partial).
+- **"OpenCode sessions" (partial-isolation warning)** warns ONLY when the
+  global data dir `${XDG_DATA_HOME:-$HOME/.local/share}/opencode` (§3.3)
+  EXISTS — evidence OpenCode is in use and sessions ARE accumulating
+  globally. Absent dir → the same limitation is stated at ok level
+  ("nothing stored there yet"). Rationale: §15.3's "must warn" taken
+  unconditionally would make every default-config project exit 3 forever,
+  which D021/D023 rejected for auth; conditioning on observed global data
+  warns exactly when the leak is real while a fresh machine stays exit 0.
+  The limitation text + opt-in remedy appear at BOTH levels, so doctor
+  always states the §15.3 fact.
+- **"OpenCode merge chain" (§23 must-warn)** inspects the global
+  `${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json`. "Will leak" =
+  JSON object with ≥1 top-level key besides `$schema` (warn lists the keys,
+  sorted). Absent / empty file / `{}` / schema-only → ok. Unparseable
+  (OpenCode tolerates JSONC; we only parse strict JSON via stdlib
+  encoding/json — NOT a new dependency, D004 intact) or unreadable or
+  non-regular → conservative warn ("review it manually"): doctor cannot
+  prove it leaks nothing.
+- Both resolve global paths from the injected Env (HOME / XDG_* lookups),
+  never the process env — fully fakeable; HOME+XDG both unset → ok-level
+  "cannot locate". Helpers: `globalOpencodeDataDir` /
+  `globalOpencodeConfigPath` / `opencodeConfigKeys` in doctor.go; reuse
+  them when the handoff exclusion engine needs the same paths.

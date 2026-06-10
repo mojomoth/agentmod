@@ -1,7 +1,7 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 3 — doctor slice 3:
-agent binaries / Claude+Codex auth state / OpenCode config state)
+Last updated: 2026-06-11 (iteration: Phase 3 — doctor slice 4:
+OpenCode partial-isolation + merge-chain leak warnings)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
@@ -261,6 +261,30 @@ agent binaries / Claude+Codex auth state / OpenCode config state)
     (matching init's guarantee) — new doctor tests relying on a healthy
     fixture get it for free. 7 new test funcs; TestDoctorAllHealthy +
     fresh-machine test assert the new ok lines.
+- doctor slice 4 LANDED and green (Phase 3 item 4 ✅, D024): the two §15.3
+  OpenCode leak findings added to doctor.go, read-only, exit contract
+  unchanged. Read D021–D024 before extending doctor.
+  - "OpenCode sessions": warns ONLY when the global data dir
+    `${XDG_DATA_HOME:-$HOME/.local/share}/opencode` exists (sessions really
+    are accumulating globally); absent → same limitation at ok level
+    ("nothing stored there yet"), so default-config fixtures stay exit 0.
+    The opt-in remedy (opencode.xdg_full_isolation = true) is in BOTH
+    details.
+  - "OpenCode merge chain": global `${XDG_CONFIG_HOME:-$HOME/.config}/
+    opencode/opencode.json` with ≥1 top-level key besides `$schema` → warn
+    listing sorted keys; absent/empty/`{}`/schema-only → ok; unparseable
+    (JSONC) / unreadable / non-regular → conservative warn. Strict-JSON
+    parse via stdlib encoding/json (no new dependency).
+  - Both skipped entirely (no line) when opencode disabled; both ok when
+    xdg_full_isolation on; broken config = defaults. Global paths resolve
+    from injected Env only. Helpers `globalOpencodeDataDir` /
+    `globalOpencodeConfigPath` / `opencodeConfigKeys` — reuse for handoff
+    exclusions later. 8 new test funcs in doctor_test.go (+ helpers
+    `wantNoFinding`, `writeGlobalOpencodeConfig`); TestDoctorAllHealthy
+    asserts the two new ok lines. XDG-opt-in test gotcha: healthyVars
+    builds routing vars from config.Default(), so overlay
+    `routing.Vars(agentmodDir, cfg)` on top when the project cfg enables
+    XDG, or misroutedVars warns.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -293,25 +317,22 @@ mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 3 fourth item: "doctor: OpenCode partial-isolation + merge-chain
-leak warnings" (TASKS.md Phase 3 top unchecked). Before writing code:
-- Read D021 + D022 + D023 (doctor structure/severity/exit contract);
-  extend the findings list in doctor.go, do NOT change exit semantics.
-- Spec: FABLE_PLAN §15.3 — two distinct warnings: (1) in DEFAULT partial
-  mode, sessions/storage/auth stay in the global XDG data dir → doctor
-  must WARN that OpenCode sessions are not project-isolated (suppressed
-  when cfg.OpenCode.XDGFullIsolation is on, since then they ARE routed);
-  (2) merge chain: global `~/.config/opencode/opencode.json` is still
-  merged in → warn when global plugins/config will leak into the project
-  view (read the global file via env HOME / XDG_CONFIG_HOME lookup —
-  read-only, fakeable in tests; decide and record what counts as "will
-  leak": likely file-exists-and-non-empty-object, maybe plugin keys).
-- Extend opencodeConfigFinding or add new findings next to it; reuse the
-  "OpenCode config" label family. Disabled opencode → skip both warnings.
-- Tests: fakeEnv with temp HOME containing a fixture global
-  opencode.json (obviously-fake content, CHECKS.md §5); positive +
-  negative (XDG opt-in suppresses #1; absent/empty global config
-  suppresses #2).
+Phase 3 fifth item: "doctor: macOS Keychain note; gstack global-risk
+check" (TASKS.md Phase 3 top unchecked). Before writing code:
+- Read D021–D024 (doctor structure/severity/exit contract); extend the
+  findings list in doctor.go, do NOT change exit semantics.
+- Keychain note (§15.1/§3.1): on darwin, Claude auth lives in the shared
+  macOS Keychain — no per-project account isolation; doctor should STATE
+  this (ok-level, it is a platform fact, not a problem; decide how to
+  gate on GOOS so tests can fake it — likely inject the OS string rather
+  than reading runtime.GOOS directly, same philosophy as Env).
+- gstack (§16/§23 must-warn): warn when global `~/.claude/skills/gstack`
+  exists (resolve via injected Env HOME — read-only stat); also report
+  project-local gstack install state (.agentmod/claude/skills/gstack
+  present/absent, ok-level both ways — install command is Phase 4).
+- Tests: fakeEnv with temp HOME containing a fake ~/.claude/skills/gstack
+  dir (positive) and without (negative); Keychain note assertion must not
+  break on linux CI — gate or inject GOOS.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

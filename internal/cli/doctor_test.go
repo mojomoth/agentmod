@@ -12,14 +12,18 @@ import (
 	"github.com/agentmod/agentmod/internal/routing"
 )
 
-// mkLayout creates the init-managed directories under root/.agentmod so the
-// layout check passes.
+// mkLayout creates the init-managed directories under root/.agentmod plus
+// the opencode.json stub, so the layout and OpenCode-config checks pass.
 func mkLayout(t *testing.T, root string) {
 	t.Helper()
 	for _, sub := range layout.Subdirs() {
 		if err := os.MkdirAll(filepath.Join(root, ".agentmod", sub), 0o755); err != nil {
 			t.Fatal(err)
 		}
+	}
+	stub := layout.OpencodeConfigPath(filepath.Join(root, ".agentmod"))
+	if err := os.WriteFile(stub, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -90,6 +94,10 @@ func TestDoctorAllHealthy(t *testing.T) {
 	wantLevel(t, findingLine(t, stdout, "Shims"), diagOK)
 	wantLevel(t, findingLine(t, stdout, "PATH"), diagOK)
 	wantLevel(t, findingLine(t, stdout, "HOME"), diagOK)
+	wantLevel(t, findingLine(t, stdout, "Claude home"), diagOK)
+	wantLevel(t, findingLine(t, stdout, "Codex home"), diagOK)
+	wantLevel(t, findingLine(t, stdout, "OpenCode config"), diagOK)
+	wantLevel(t, findingLine(t, stdout, "Agent binaries"), diagOK)
 	wantContains(t, "Project line", findingLine(t, stdout, "Project"), root, filepath.Join(root, ".agentmod"))
 	wantContains(t, "Routing line", findingLine(t, stdout, "Routing env"), "applied for this project")
 	wantContains(t, "PATH line", findingLine(t, stdout, "PATH"), "on PATH once")
@@ -113,6 +121,10 @@ func TestDoctorOutsideProjectFreshMachineIsClean(t *testing.T) {
 	wantLevel(t, lingering, diagOK)
 	wantContains(t, "Routing line", lingering, "no agentmod variables lingering")
 	wantLevel(t, findingLine(t, stdout, "HOME"), diagOK)
+	// Binary presence is reported out here too (§23), informationally.
+	binaries := findingLine(t, stdout, "Agent binaries")
+	wantLevel(t, binaries, diagOK)
+	wantContains(t, "Agent binaries line", binaries, "claude not found on PATH")
 }
 
 func TestDoctorHookInstalledButInactive(t *testing.T) {
@@ -509,6 +521,152 @@ func TestDoctorProjectLocalInstallIsNotAShim(t *testing.T) {
 	line := findingLine(t, stdout, "Shims")
 	wantLevel(t, line, diagOK)
 	wantContains(t, "Shims line", line, "claude", "project-local installs")
+}
+
+func TestDoctorAuthMissingIsInformational(t *testing.T) {
+	// §23 "auth present / re-login needed" with §12's re-login instructions.
+	// A fresh project has no auth — that is a state, not a problem (D023):
+	// doctor reports the exact next step at ok level and still exits 0.
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+	}
+	claude := findingLine(t, stdout, "Claude home")
+	wantLevel(t, claude, diagOK)
+	wantContains(t, "Claude home line", claude,
+		filepath.Join(root, ".agentmod", "claude"),
+		"no auth file (.credentials.json)",
+		"running 'claude' inside this project",
+	)
+	codex := findingLine(t, stdout, "Codex home")
+	wantLevel(t, codex, diagOK)
+	wantContains(t, "Codex home line", codex,
+		filepath.Join(root, ".agentmod", "codex"),
+		"no auth file (auth.json)",
+		"re-login needed: run 'codex login' inside this project",
+	)
+}
+
+func TestDoctorAuthPresent(t *testing.T) {
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	for _, f := range []struct{ dir, name string }{
+		{"claude", ".credentials.json"},
+		{"codex", "auth.json"},
+	} {
+		path := filepath.Join(root, ".agentmod", f.dir, f.name)
+		if err := os.WriteFile(path, []byte(`{"token":"sk-FAKE-fixture"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+	}
+	claude := findingLine(t, stdout, "Claude home")
+	wantLevel(t, claude, diagOK)
+	wantContains(t, "Claude home line", claude, "auth present (.credentials.json)")
+	codex := findingLine(t, stdout, "Codex home")
+	wantLevel(t, codex, diagOK)
+	wantContains(t, "Codex home line", codex, "auth present (auth.json)")
+}
+
+func TestDoctorAuthPathNotARegularFile(t *testing.T) {
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	if err := os.MkdirAll(filepath.Join(root, ".agentmod", "codex", "auth.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "Codex home")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "Codex home line", line, "not a regular file", "move it aside")
+}
+
+func TestDoctorDisabledAgentsReportDisabledRouting(t *testing.T) {
+	cfg := config.Default()
+	cfg.Claude.Enabled = false
+	cfg.Codex.Enabled = false
+	cfg.OpenCode.Enabled = false
+	root := makeProject(t, cfg)
+	mkLayout(t, root)
+	vars := healthyVars(t, root)
+	// healthyVars routes for the default config; rebuild for this one.
+	for _, v := range routing.Vars(filepath.Join(root, ".agentmod"), config.Default()) {
+		delete(vars, v.Name)
+	}
+	for _, v := range routing.Vars(filepath.Join(root, ".agentmod"), cfg) {
+		vars[v.Name] = v.Value
+	}
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, vars))
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+	}
+	wantContains(t, "Claude home line", findingLine(t, stdout, "Claude home"), "routing disabled (claude.enabled = false)")
+	wantContains(t, "Codex home line", findingLine(t, stdout, "Codex home"), "routing disabled (codex.enabled = false)")
+	wantContains(t, "OpenCode line", findingLine(t, stdout, "OpenCode config"), "routing disabled (opencode.enabled = false)")
+}
+
+func TestDoctorOpencodeConfigState(t *testing.T) {
+	// Missing stub: OpenCode would fall back to the global merge chain alone;
+	// re-init recreates it → warn.
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	stub := layout.OpencodeConfigPath(filepath.Join(root, ".agentmod"))
+	if err := os.Remove(stub); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+	if code != ExitValidation {
+		t.Fatalf("missing: exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "OpenCode config")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "OpenCode line", line, stub, "missing", "re-run 'agentmod init'")
+
+	// A directory where the config file belongs blocks routing → error.
+	if err := os.MkdirAll(stub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ = runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+	if code != ExitValidation {
+		t.Fatalf("not-regular: exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line = findingLine(t, stdout, "OpenCode config")
+	wantLevel(t, line, diagError)
+	wantContains(t, "OpenCode line", line, "not a regular file")
+}
+
+func TestDoctorAgentBinariesOnPath(t *testing.T) {
+	// Stat-based PATH walk: an executable regular file counts; a
+	// non-executable file does not. Always ok-level — absence is information.
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	binDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(binDir, "claude"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "codex"), []byte("not executable"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	vars := healthyVars(t, root)
+	vars["PATH"] = vars["PATH"] + sep + binDir
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, vars))
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+	}
+	line := findingLine(t, stdout, "Agent binaries")
+	wantLevel(t, line, diagOK)
+	wantContains(t, "Agent binaries line", line,
+		"claude at "+filepath.Join(binDir, "claude"),
+		"codex not found on PATH",
+		"opencode not found on PATH",
+	)
 }
 
 func TestDoctorRejectsArgs(t *testing.T) {

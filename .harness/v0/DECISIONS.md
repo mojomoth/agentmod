@@ -326,3 +326,31 @@ Four §23 warnings added to doctor (read with D021; exit semantics unchanged):
 - `.agentmod`-element matching (`hasAgentmodElement`) is the shared
   "points into some agentmod root, whosever it is" test for HOME, lingering
   values, and PATH entries.
+
+## D023 — 2026-06-11 — doctor slice 3: agent binaries + home/auth state
+Three §23 subjects added (read with D021/D022; exit semantics unchanged):
+- **Auth absence is ok-level, not a warn.** §23's must-warn list does not
+  include auth; a fresh project legitimately has no auth yet, and warning
+  would make every `agentmod init && agentmod doctor` exit 3 forever for
+  agents the user never runs. The ok-detail carries §12's exact re-login
+  instruction instead ("run 'codex login' inside this project"; for Claude,
+  "running 'claude' inside this project" — hedged with "may ask" because on
+  macOS Keychain auth makes the file legitimately absent; the explicit
+  Keychain note is the next-next doctor task). Auth file names per §12/§15:
+  `claude/.credentials.json`, `codex/auth.json` (constants in doctor.go).
+  Auth path present but NOT a regular file → warn. Doctor stays read-only:
+  copy-on-consent is the Phase 3 bootstrap task, which will also add the
+  global-auth-exists comparison; this slice is local-state-only.
+- **Disabled agents** report `routing disabled (<key>.enabled = false)` at
+  ok (same wording family as status). Broken config (cfgOK=false) treats
+  all agents as enabled — file checks don't need config, and silence on a
+  broken-config machine would hide state.
+- **OpenCode's subject is the config stub** (`opencode/opencode.json`), not
+  auth — partial mode keeps auth/sessions global (§15.3; those warnings are
+  the NEXT task). Missing stub → warn (re-init recreates it); a non-regular
+  entry at that path → error (blocks routing). doctor_test's `mkLayout` now
+  writes the stub, matching what init guarantees.
+- **Binary presence** ("Agent binaries", in AND out of project) is a
+  stat-only PATH walk (`statBinaryOnPath`: executable regular file;
+  exec.LookPath unusable — reads the real PATH, not the injected Env's).
+  Always ok-level: not every project uses all three agents.

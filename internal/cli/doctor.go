@@ -77,8 +77,10 @@ func runDoctor(args []string, stdout, stderr io.Writer, env Env) int {
 			add(diagOK, "Config", proj.ConfigPath+" is valid")
 		}
 		findings = append(findings, layoutFinding(proj.AgentmodDir))
+		findings = append(findings, agentHomeFindings(proj, cfg, cfgOK)...)
 		findings = append(findings, shimFinding(proj.AgentmodDir))
 	}
+	findings = append(findings, agentBinariesFinding(env))
 
 	// Shell type + rc-hook block. The skip reasons (exotic shell, no
 	// SHELL/HOME) reuse init's wording; inside a project they are warnings
@@ -159,6 +161,104 @@ func layoutFinding(agentmodDir string) finding {
 		return finding{diagWarn, "Layout", fmt.Sprintf("missing under .agentmod/: %s — re-run 'agentmod init' to recreate", strings.Join(missing, ", "))}
 	}
 	return finding{diagOK, "Layout", fmt.Sprintf("all %d directories present under .agentmod/", len(layout.Subdirs()))}
+}
+
+// Per-agent auth files inside the project-local homes (FABLE_PLAN §12/§15):
+// Codex keeps auth.json under CODEX_HOME; Claude keeps .credentials.json
+// under CLAUDE_CONFIG_DIR on Linux/Windows (macOS uses the shared Keychain —
+// that platform note is a separate doctor item).
+const (
+	claudeAuthFile = ".credentials.json"
+	codexAuthFile  = "auth.json"
+)
+
+// agentHomeFindings reports each agent's project-local home state (§23),
+// including auth present / re-login needed per §12. Auth absence is ok-level
+// (D023): a fresh project legitimately has no auth yet, so the finding
+// carries the exact re-login instruction instead of warning. OpenCode has no
+// project-local auth in partial-isolation mode (§15.3) — its subject is the
+// routed config file; the session/merge-chain warnings are a separate item.
+func agentHomeFindings(proj *project.Project, cfg config.Config, cfgOK bool) []finding {
+	return []finding{
+		agentAuthFinding("Claude home",
+			filepath.Join(proj.AgentmodDir, layout.ClaudeDir), claudeAuthFile,
+			"claude may ask you to log in here; complete it once by running 'claude' inside this project",
+			!cfgOK || cfg.Claude.Enabled, "claude.enabled = false"),
+		agentAuthFinding("Codex home",
+			filepath.Join(proj.AgentmodDir, layout.CodexDir), codexAuthFile,
+			"re-login needed: run 'codex login' inside this project",
+			!cfgOK || cfg.Codex.Enabled, "codex.enabled = false"),
+		opencodeConfigFinding(proj.AgentmodDir, !cfgOK || cfg.OpenCode.Enabled),
+	}
+}
+
+// agentAuthFinding inspects one agent's project-local home for its auth
+// file. Strictly read-only: copying global auth into the home is the
+// consent-based bootstrap (§12), a separate command path, never doctor's.
+func agentAuthFinding(label, home, authFile, remedy string, enabled bool, disabledKey string) finding {
+	if !enabled {
+		return finding{diagOK, label, fmt.Sprintf("routing disabled (%s)", disabledKey)}
+	}
+	info, err := os.Stat(filepath.Join(home, authFile))
+	switch {
+	case err == nil && info.Mode().IsRegular():
+		return finding{diagOK, label, fmt.Sprintf("%s — auth present (%s)", home, authFile)}
+	case err == nil:
+		return finding{diagWarn, label, fmt.Sprintf(
+			"%s exists but is not a regular file — move it aside, then log in again", filepath.Join(home, authFile))}
+	}
+	return finding{diagOK, label, fmt.Sprintf("%s — no auth file (%s); %s", home, authFile, remedy)}
+}
+
+// opencodeConfigFinding checks the OPENCODE_CONFIG target init stubs out.
+// Without it OpenCode silently falls back to the global merge chain alone,
+// but re-init recreates it — degraded-recoverable, so missing warns.
+func opencodeConfigFinding(agentmodDir string, enabled bool) finding {
+	path := layout.OpencodeConfigPath(agentmodDir)
+	if !enabled {
+		return finding{diagOK, "OpenCode config", "routing disabled (opencode.enabled = false)"}
+	}
+	info, err := os.Stat(path)
+	switch {
+	case err == nil && info.Mode().IsRegular():
+		return finding{diagOK, "OpenCode config", path + " present"}
+	case err == nil:
+		return finding{diagError, "OpenCode config", path + " is not a regular file — move it aside and re-run 'agentmod init'"}
+	}
+	return finding{diagWarn, "OpenCode config", path + " missing — re-run 'agentmod init' to recreate it"}
+}
+
+// agentBinariesFinding reports which agent CLIs are reachable (§23 "Claude /
+// Codex / OpenCode binaries present"). Stat-based PATH walk — doctor never
+// executes anything. Always ok-level: not every project uses all three
+// agents, so an absent binary is information, not a problem.
+func agentBinariesFinding(env Env) finding {
+	path, _ := env.LookupEnv("PATH")
+	var parts []string
+	for _, name := range agentNames {
+		if found := statBinaryOnPath(name, path); found != "" {
+			parts = append(parts, name+" at "+found)
+		} else {
+			parts = append(parts, name+" not found on PATH")
+		}
+	}
+	return finding{diagOK, "Agent binaries", strings.Join(parts, "; ")}
+}
+
+// statBinaryOnPath is a stat-only exec.LookPath: first PATH entry holding an
+// executable regular file named name. exec.LookPath itself is unusable here
+// because it reads the process's real PATH, not the injected Env's.
+func statBinaryOnPath(name, path string) string {
+	for _, dir := range strings.Split(path, string(os.PathListSeparator)) {
+		if dir == "" {
+			continue
+		}
+		candidate := filepath.Join(dir, name)
+		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0 {
+			return candidate
+		}
+	}
+	return ""
 }
 
 // routingFinding classifies this shell's routing state against the project

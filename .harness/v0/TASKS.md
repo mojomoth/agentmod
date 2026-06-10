@@ -34,7 +34,7 @@ Add/split items freely; keep units small.
 ## Phase 3 — doctor + guard + auth
 - [x] doctor: project/root/shell/hook/env checks (+ tests)
 - [x] doctor: HOME-change, shim, lingering-vars, dup-PATH warnings (+ tests)
-- [ ] doctor: per-agent home state incl. auth present / re-login needed (+ tests)
+- [x] doctor: per-agent home state incl. auth present / re-login needed (+ tests)
 - [ ] doctor: OpenCode partial-isolation + merge-chain leak warnings (+ tests)
 - [ ] doctor: macOS Keychain note; gstack global-risk check (+ tests)
 - [ ] guard claude-bash: stdin contract, deny rules, fail-safe (+ table tests)

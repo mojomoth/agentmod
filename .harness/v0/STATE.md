@@ -1,7 +1,7 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 3 — doctor slice 2:
-lingering-vars / dup-PATH / HOME / shim warnings)
+Last updated: 2026-06-11 (iteration: Phase 3 — doctor slice 3:
+agent binaries / Claude+Codex auth state / OpenCode config state)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
@@ -240,6 +240,27 @@ lingering-vars / dup-PATH / HOME / shim warnings)
     9 new test funcs; TestDoctorAllHealthy asserts the three new ok lines;
     fresh-machine test now asserts the ok lingering line instead of
     absence of "Routing env".
+- doctor slice 3 LANDED and green (Phase 3 item 3 ✅, D023): per-agent
+  findings added to doctor.go, read-only, exit contract unchanged. Read
+  D021+D022+D023 before extending doctor.
+  - "Claude home"/"Codex home": auth file state (claude/.credentials.json,
+    codex/auth.json — constants in doctor.go per §12/§15). Present → ok;
+    ABSENT → ok too (D023: not in §23's must-warn list; fresh projects
+    must not exit 3 forever) with §12's exact re-login instruction in the
+    detail; present-but-not-regular-file → warn. Disabled agents → ok
+    "routing disabled (<key>.enabled = false)"; broken config treats all
+    agents enabled. Global-auth comparison + copy prompt belong to the
+    auth copy-on-consent task, NOT doctor.
+  - "OpenCode config": opencode/opencode.json present ok / missing warn
+    (re-init recreates) / non-regular error. Partial-isolation session +
+    merge-chain warnings are the NEXT task — not covered here.
+  - "Agent binaries" (in AND out of project, always ok-level):
+    `statBinaryOnPath` stat-only PATH walk (executable regular file);
+    exec.LookPath rejected — it reads the real PATH, not injected Env.
+  - doctor_test.go `mkLayout` now also writes the opencode.json stub
+    (matching init's guarantee) — new doctor tests relying on a healthy
+    fixture get it for free. 7 new test funcs; TestDoctorAllHealthy +
+    fresh-machine test assert the new ok lines.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -272,21 +293,25 @@ mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 3 third item: "doctor: per-agent home state incl. auth present /
-re-login needed" (TASKS.md Phase 3 top unchecked). Before writing code:
-- Read D021 + D022 (doctor structure/severity/exit contract); extend the
-  findings list in doctor.go, do NOT change exit semantics.
-- Spec: FABLE_PLAN §23 ("Claude/Codex/OpenCode binaries present",
-  "Claude/Codex project-local home state including auth present /
-  re-login needed per §12", "OpenCode project-local config state") + §15
-  (per-agent auth file locations) — read §12/§15 first; auth FILE NAMES
-  inside the project-local homes are the check subjects
-  (e.g. .agentmod/claude/.credentials.json — confirm names in §15).
-- Binary presence: LookupEnv("PATH") walk + os.Stat per agent name —
-  doctor has no exec; keep it stat-based like the shim check.
-- Auth state is read-only detection; auth copy-on-consent (the fixer) is
-  a separate Phase 3 task. Tests: fakeEnv + temp homes with fixture
-  files using obviously-fake values (CHECKS.md §5).
+Phase 3 fourth item: "doctor: OpenCode partial-isolation + merge-chain
+leak warnings" (TASKS.md Phase 3 top unchecked). Before writing code:
+- Read D021 + D022 + D023 (doctor structure/severity/exit contract);
+  extend the findings list in doctor.go, do NOT change exit semantics.
+- Spec: FABLE_PLAN §15.3 — two distinct warnings: (1) in DEFAULT partial
+  mode, sessions/storage/auth stay in the global XDG data dir → doctor
+  must WARN that OpenCode sessions are not project-isolated (suppressed
+  when cfg.OpenCode.XDGFullIsolation is on, since then they ARE routed);
+  (2) merge chain: global `~/.config/opencode/opencode.json` is still
+  merged in → warn when global plugins/config will leak into the project
+  view (read the global file via env HOME / XDG_CONFIG_HOME lookup —
+  read-only, fakeable in tests; decide and record what counts as "will
+  leak": likely file-exists-and-non-empty-object, maybe plugin keys).
+- Extend opencodeConfigFinding or add new findings next to it; reuse the
+  "OpenCode config" label family. Disabled opencode → skip both warnings.
+- Tests: fakeEnv with temp HOME containing a fixture global
+  opencode.json (obviously-fake content, CHECKS.md §5); positive +
+  negative (XDG opt-in suppresses #1; absent/empty global config
+  suppresses #2).
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

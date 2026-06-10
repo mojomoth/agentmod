@@ -1,15 +1,15 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 4 slice 3 — install gstack
-global pollution verification)
+Last updated: 2026-06-11 (iteration: Phase 4 final slice — install gstack
+distinct error reporting, D033)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
   both shell hooks + rc editor + env-hygiene integration tests + the
   first-session diagnosis). Phase 3 COMPLETE (six doctor slices + guard
   claude-bash + guard wiring T17 + auth copy-on-consent T15). Phase 4
-  IN PROGRESS: install gstack clone + --force + pollution verification
-  landed; remaining: distinct error-reporting tests (last item).
+  COMPLETE (install gstack clone + --force + pollution verification +
+  distinct error reporting; T18 ✅). Next up: Phase 5 (handoff create).
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -474,6 +474,25 @@ global pollution verification)
   - Binary smoke in /tmp passed: install against real HOME printed
     "Global skills check: /Users/…/.claude/skills unchanged" (read-only),
     exit 0.
+- install gstack distinct error reporting LANDED and green (Phase 4 final
+  slice ✅, D032→D033, T18 ✅): read D030–D033 before touching installer code.
+  - Clone failure now appends a two-line hint after the forwarded git
+    output: check network/source reachability + the
+    `AGENTMOD_GSTACK_SOURCE=<url-or-path>` override. Decision (D033): git's
+    CombinedOutput IS the diagnosis (it distinguishes DNS vs not-found vs
+    auth itself); agentmod does not classify. Only product change this
+    iteration — everything else was already distinct.
+  - 2 new test funcs in install_test.go: GitMissing (t.Setenv PATH to an
+    empty temp dir — install uses the REAL PATH per D030; asserts the
+    distinct needs-git message + nothing created) and
+    SetupFailureSkillsBlocked (regular FILE at claude/skills → ENOTDIR;
+    asserts "not a directory" + path on stderr, exit 1, blocker untouched —
+    note the failure fires at the initial Lstat, not MkdirAll; the test
+    asserts the user-visible contract, see D033). CloneFailure test grew
+    forwarding assertions (`fatal:` + `does not exist` — git's words, never
+    ours) + hint-line assertions.
+  - Binary smoke in /tmp passed: bogus local source → forwarded fatal line
+    + both hint lines, exit 1.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -508,32 +527,24 @@ other two homes and the skills list unchanged; no agentmod artifacts.)
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 4, final item: "error reporting: no git, network failure, setup
-failure (+ tests)" per IMPLEMENTATION_PLAN §10 "Distinct errors:
-not-a-project / git-missing / network / target-exists". Audit what already
-exists vs what's missing:
-- not-a-project (exit 2 + 'agentmod init' remedy) and target-exists
-  (--force hint) are DONE with tests; git-missing has a distinct message
-  ("install gstack needs git, which was not found on PATH") but NO test —
-  it uses real exec.LookPath, so the test must run the command with a
-  crippled process PATH (exec.LookPath reads the real env; consider
-  t.Setenv("PATH", emptyDir) — t.Setenv on PATH is fine, it's not HOME/
-  global agent state).
-- network/clone failure currently prints "git clone failed: <err>\n<git
-  output>" — decide whether that satisfies "distinct" (git's own stderr
-  names the cause: could not resolve host vs repository not found) or
-  whether agentmod should classify. Lean minimal: keep git's output as the
-  diagnosis, add a test asserting the git stderr is FORWARDED (the existing
-  clone-failure test only checks our prefix), plus a hint line about
-  AGENTMOD_GSTACK_SOURCE/network. Record the choice in a D.
-- "setup failure" from the TASKS wording = local FS failures (MkdirAll/
-  rename) — already distinct via %v passthrough; a test would need fault
-  injection (e.g. skills dir as a read-only dir or a FILE at claude/skills
-  blocking MkdirAll — the latter is easy and honest).
-- After this, Phase 4 is COMPLETE → next is Phase 5 (handoff create,
-  .amod writer). Re-read FABLE_PLAN §17–§20 + IMPLEMENTATION_PLAN §12
-  before starting it; remember D028's exclusion-list note (consent-copied
-  auth files MUST be excluded).
+Phase 5, first item: ".amod writer: zip + manifest + inventory + sha256
+checksums (+ tests)" — `agentmod handoff create`. Before writing any code,
+re-read FABLE_PLAN §17–§20 and IMPLEMENTATION_PLAN §12 (this iteration did
+not; the notes below are carry-overs from earlier iterations, verify them
+against the spec):
+- D028's standing exclusion note: consent-copied auth files
+  (`claude/.credentials.json`, `codex/auth.json`, rel to .agentmod/) MUST
+  be on the T20 default-exclusion list.
+- Reuse `globalOpencodeDataDir`/`globalOpencodeConfigPath` (doctor.go) if
+  handoff exclusions need the global OpenCode paths (noted in D024).
+- Probably a new `internal/handoff` (or similar) package — this is the
+  first command with real product logic beyond cli glue; decide package
+  shape against IMPLEMENTATION_PLAN's architecture section and record it.
+- Slice it: the TASKS item is writer+manifest+inventory+checksums in one
+  line, but exclusion engine / redaction / docs / git-metadata are SEPARATE
+  items — keep the first slice to "pack .agentmod/ honoring nothing fancy,
+  correct zip + manifest + inventory + sha256, tests with fixture trees",
+  and let the exclusion engine slice refine what goes in.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

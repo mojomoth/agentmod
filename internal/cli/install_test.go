@@ -145,6 +145,12 @@ func TestInstallGstackCloneFailure(t *testing.T) {
 		t.Fatalf("exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, ExitError, stdout, stderr)
 	}
 	wantContains(t, "stderr", stderr, "git clone failed")
+	// git's own diagnosis must be forwarded verbatim (D033): for a missing
+	// local path git says `fatal: repository '…' does not exist` — words no
+	// agentmod message uses, so their presence proves the forwarding.
+	wantContains(t, "stderr", stderr, "fatal:", "does not exist")
+	// And the hint names the source override for mirror/offline situations.
+	wantContains(t, "stderr", stderr, "check network access", gstackSourceEnvVar)
 	if _, err := os.Lstat(target); !os.IsNotExist(err) {
 		t.Errorf("target %s exists after failed clone (err %v)", target, err)
 	}
@@ -154,6 +160,55 @@ func TestInstallGstackCloneFailure(t *testing.T) {
 	}
 	for _, e := range entries {
 		t.Errorf("entry %q left in skills dir after failed clone", e.Name())
+	}
+}
+
+func TestInstallGstackGitMissing(t *testing.T) {
+	root := makeProject(t, config.Default())
+
+	// install resolves git with exec.LookPath on the REAL process PATH
+	// (unlike doctor's injected-Env walk — see installGstack's doc comment),
+	// so crippling the real PATH is the honest way to simulate a machine
+	// without git. t.Setenv restores it afterwards; PATH is not global agent
+	// state, so this stays within the harness rules.
+	t.Setenv("PATH", t.TempDir())
+
+	code, stdout, stderr := runInstallForTest(t, fakeEnv(root, nil))
+	if code != ExitError {
+		t.Fatalf("exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, ExitError, stdout, stderr)
+	}
+	wantContains(t, "stderr", stderr, "install gstack needs git, which was not found on PATH")
+	// The git check runs before any directory creation.
+	if _, err := os.Lstat(filepath.Join(root, ".agentmod", "claude", "skills")); !os.IsNotExist(err) {
+		t.Errorf("skills dir created despite missing git (err %v)", err)
+	}
+}
+
+func TestInstallGstackSetupFailureSkillsBlocked(t *testing.T) {
+	root := makeProject(t, config.Default())
+	claudeDir := filepath.Join(root, ".agentmod", "claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A regular FILE where the skills directory belongs: every path-based
+	// operation on claude/skills/... fails with ENOTDIR. The bogus local
+	// source guarantees that even a (buggy) clone attempt fails fast offline.
+	blocker := filepath.Join(claudeDir, "skills")
+	if err := os.WriteFile(blocker, []byte("user file in the way\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runInstallForTest(t, fakeEnv(root, map[string]string{
+		gstackSourceEnvVar: filepath.Join(t.TempDir(), "no-such-repo"),
+	}))
+	if code != ExitError {
+		t.Fatalf("exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, ExitError, stdout, stderr)
+	}
+	// The PathError passthrough is the distinct diagnosis: it names the
+	// operation, the blocked path, and the OS cause (D033).
+	wantContains(t, "stderr", stderr, "not a directory", filepath.Join("claude", "skills"))
+	if got, err := os.ReadFile(blocker); err != nil || string(got) != "user file in the way\n" {
+		t.Errorf("blocking file was disturbed: %q, %v", got, err)
 	}
 }
 

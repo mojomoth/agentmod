@@ -48,7 +48,9 @@ Add/split items freely; keep units small.
       (outside-project exit-2 + already-installed abort landed with the clone
        task; --force clone-first-then-swap landed in its own slice, D031)
 - [x] global before/after pollution verification + abort path (+ tests)
-- [ ] error reporting: no git, network failure, setup failure (+ tests)
+- [x] error reporting: no git, network failure, setup failure (+ tests)
+      (D033: git output forwarded verbatim + source-override hint;
+       git-missing via crippled real PATH; ENOTDIR fault injection)
 
 ## Phase 5 — handoff create
 - [ ] .amod writer: zip + manifest + inventory + sha256 checksums (+ tests)

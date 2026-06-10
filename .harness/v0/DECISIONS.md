@@ -654,3 +654,40 @@ routed, so neither leak exists). Broken config = defaults (enabled, partial).
   ENOTDIR skip integration; direct `verifyGlobalSkillsUnchanged` call for
   the removed-entry branch. fakeEnv has no HOME, so every pre-existing
   install test also asserts/tolerates the skip line.
+
+## D033 — 2026-06-11 — install gstack: distinct error reporting shape
+
+IMPLEMENTATION_PLAN §10 requires distinct errors for not-a-project /
+git-missing / network / target-exists. The first and last landed with
+D030/D031; this records how the remaining two (plus "setup failure") are
+diagnosed and tested.
+
+- **Network/clone failure: forward git, don't classify.** git's own output
+  already distinguishes the causes (`Could not resolve host` vs
+  `repository … not found/does not exist` vs auth refusal) more precisely
+  than any wrapper taxonomy, so agentmod forwards CombinedOutput verbatim
+  after the `git clone failed: <err>` line, then appends a two-line hint:
+  check network access / source reachability, and the
+  `AGENTMOD_GSTACK_SOURCE=<url-or-path>` override for mirrors and offline
+  use. No exit-code or message-prefix taxonomy was added. Test proves
+  FORWARDING by asserting git's own words (`fatal:` + `does not exist` for
+  a missing local source) — strings no agentmod message contains — plus
+  the hint's env-var name.
+- **git-missing: tested with a crippled REAL PATH.** installGstack resolves
+  git via exec.LookPath on the process PATH (documented D030 exception to
+  the injected-Env rule), so the test uses `t.Setenv("PATH", t.TempDir())`.
+  PATH is not global agent state; t.Setenv auto-restores. Asserts the
+  distinct "install gstack needs git, which was not found on PATH" message
+  and that NOTHING was created (the git check precedes MkdirAll).
+- **Setup failure = PathError passthrough, no rewording.** Local FS
+  failures (Lstat/MkdirAll/MkdirTemp/Rename) surface as `agentmod: <op>
+  <path>: <cause>` via %v — the PathError already names operation, path,
+  and OS cause; wrapping would only duplicate it. Fault-injection test: a
+  regular FILE at `claude/skills` makes every path operation under it fail
+  ENOTDIR. NOTE (honesty): with that blocker the failure fires at the
+  initial `Lstat(target)` (ENOTDIR is not IsNotExist), not at MkdirAll —
+  the test asserts the user-visible contract (exit 1, "not a directory" +
+  path on stderr, blocker byte-untouched), not which call tripped first.
+  A read-only-dir MkdirAll variant was considered and skipped: it needs a
+  root-skip guard and proves the same passthrough.
+- Phase 4 is COMPLETE with this slice; T18 ✅.

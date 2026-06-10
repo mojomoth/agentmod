@@ -119,7 +119,11 @@ func installGstack(agentmodDir string, force bool, stdout, stderr io.Writer, env
 	// Never let git sit on an interactive credential prompt.
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
+		// Forward git's own output verbatim: it already distinguishes the
+		// cause (unresolvable host, repository not found, auth refused, …)
+		// better than any classification we could layer on top (D033).
 		fmt.Fprintf(stderr, "agentmod: git clone failed: %v\n%s", err, out)
+		fmt.Fprintf(stderr, "agentmod: git's output above names the cause; check network access and that\nagentmod: %s is reachable (override the source with %s=<url-or-path>)\n", source, gstackSourceEnvVar)
 		return ExitError
 	}
 	if exists {

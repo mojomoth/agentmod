@@ -113,3 +113,22 @@ it aside; init never deletes. The opencode.json stub is `{"$schema":
 Layout names live in `internal/layout` (shared by status/init/future
 routing); `layout.Subdirs()` excludes `opencode/xdg`, which only the opt-in
 XDG full-isolation mode creates.
+
+## D014 — 2026-06-10 — init .gitignore semantics (T07)
+`ensureGitignore` (internal/cli/gitignore.go) appends `.agentmod/` to
+`<cwd>/.gitignore`; user content is byte-preserved (a `\n` is prepended only
+when the file lacks a trailing newline). **Dedup** accepts a trimmed line
+equal to `.agentmod/`, `.agentmod`, `/.agentmod`, or `/.agentmod/` — all
+ignore the directory from a root .gitignore; trimming is faithful because
+git itself strips unescaped trailing whitespace. Commented (`# .agentmod/`)
+and negated (`!.agentmod/`) lines do not count. **No-git-repo grace**
+(FABLE_PLAN §12): when `.gitignore` is missing AND the directory is not in a
+git repo, init skips with "skipped (not a git repository; re-run init after
+'git init')" — creating a stray file in a non-repo would surprise; re-init
+fills it later since re-init only fills gaps. But an EXISTING `.gitignore`
+is extended even outside a repo: it signals git intent and protects a future
+`git init` from committing `.agentmod/` (which can hold consent-copied
+auth). **Repo detection** is a lexical upward walk for a `.git` entry of any
+file type (dir = normal repo, file = worktree/submodule), never exec'ing
+git — consistent with D011 discovery. `.gitignore` existing as a directory
+is a hard error, like `.agentmod`-as-a-file in D013.

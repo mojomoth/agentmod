@@ -19,11 +19,11 @@ const opencodeStub = "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\n
 
 // runInit implements the layout-creating core of `agentmod init`
 // (FABLE_PLAN §12, IMPLEMENTATION_PLAN §4): the .agentmod/ tree,
-// agentmod.toml with defaults, and the opencode.json stub, always at the
-// current directory. It never deletes or overwrites anything that exists, so
-// re-running is safe and only fills gaps. .gitignore editing, shell-hook
-// installation, and flags land as separate steps and are not handled here
-// yet.
+// agentmod.toml with defaults, the opencode.json stub, and the .gitignore
+// entry, always at the current directory. It never deletes or overwrites
+// anything that exists, so re-running is safe and only fills gaps.
+// Shell-hook installation and flags land as separate steps and are not
+// handled here yet.
 func runInit(args []string, stdout, stderr io.Writer, env Env) int {
 	if len(args) > 0 {
 		fmt.Fprintf(stderr, "agentmod: init takes no arguments yet (got %q)\n", strings.Join(args, " "))
@@ -83,6 +83,11 @@ func runInit(args []string, stdout, stderr io.Writer, env Env) int {
 		fmt.Fprintf(stderr, "agentmod: %v\n", err)
 		return ExitError
 	}
+	gitignoreStatus, err := ensureGitignore(cwd)
+	if err != nil {
+		fmt.Fprintf(stderr, "agentmod: %v\n", err)
+		return ExitError
+	}
 
 	if reinit {
 		fmt.Fprintf(stdout, "AgentMod: already initialized at %s\n", cwd)
@@ -92,6 +97,7 @@ func runInit(args []string, stdout, stderr io.Writer, env Env) int {
 	fmt.Fprintf(stdout, "  Layout:          %s\n", describeCreated(created))
 	fmt.Fprintf(stdout, "  agentmod.toml:   %s\n", describeWrite(wroteConfig, "defaults"))
 	fmt.Fprintf(stdout, "  opencode.json:   %s\n", describeWrite(wroteStub, "stub"))
+	fmt.Fprintf(stdout, "  .gitignore:      %s\n", gitignoreStatus)
 	fmt.Fprintf(stdout, "Run 'agentmod status' to see where agent homes will route.\n")
 	return ExitOK
 }

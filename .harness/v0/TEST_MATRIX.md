@@ -12,7 +12,7 @@ only when its rows are all ✅ in the Status column. Update Status as tests land
 | T04 | init layout | creates .agentmod tree (claude/codex/opencode/node/snapshots); never deletes/overwrites existing dirs | ✅ |
 | T05 | init idempotency | second run = no-op; no dup rc block; no dup .gitignore line; existing config untouched | ⬜ |
 | T06 | init flags | --no-shell-hook skips rc edits; non-interactive never prompts, never copies auth | ⬜ |
-| T07 | .gitignore | created if missing; entry deduped; non-git dir handled gracefully | ⬜ |
+| T07 | .gitignore | created if missing; entry deduped; non-git dir handled gracefully | ✅ |
 | T08 | rc fencing | block inserted once; updated in place; user content byte-preserved around it | ⬜ |
 | T09 | zsh hook | scripted zsh: cd in → vars set; cd out → vars unset; new shell inside project activates (precmd); nested project nearest-wins | ⬜ |
 | T10 | bash hook | same via PROMPT_COMMAND | ⬜ |

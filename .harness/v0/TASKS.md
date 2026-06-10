@@ -21,7 +21,7 @@ Add/split items freely; keep units small.
 
 ## Phase 2 — init + hooks
 - [x] init: .agentmod/ layout + agentmod.toml writer (+ tests)
-- [ ] init: .gitignore add w/ dedup + no-git-repo grace (+ tests)
+- [x] init: .gitignore add w/ dedup + no-git-repo grace (+ tests)
 - [ ] init: idempotency guarantee tests (run twice, byte-identical results)
 - [ ] init: flags --no-shell-hook, --yes/non-interactive (+ tests)
 - [ ] `agentmod hook zsh` + `agentmod env` transition logic (+ tests)

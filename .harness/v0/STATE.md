@@ -1,9 +1,9 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-10 (iteration: Phase 2 task 1 — `agentmod init` layout + toml writer)
+Last updated: 2026-06-10 (iteration: Phase 2 task 2 — init `.gitignore` handling, T07)
 
 ## Where things stand
-- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 item 1 LANDED.
+- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 items 1–2 LANDED.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -47,6 +47,19 @@ Last updated: 2026-06-10 (iteration: Phase 2 task 1 — `agentmod init` layout +
   - 6 test funcs in init_test.go (fresh, re-init no-clobber incl. stray
     user file, .agentmod-is-a-file, nested warn, re-init-at-root no warn,
     arg rejection).
+- init `.gitignore` handling LANDED and green (T07 ✅): new
+  `internal/cli/gitignore.go` (`ensureGitignore`), wired into runInit after
+  the opencode stub; init output gained a `.gitignore:` line. Semantics in
+  D014: append-with-byte-preservation; dedup accepts
+  `.agentmod[/ ]`/`/.agentmod[/]` trimmed (comments/negations don't count);
+  missing file created only inside a git repo (lexical upward `.git` walk,
+  any file type, no exec), else "skipped (not a git repository; re-run init
+  after 'git init')"; an EXISTING .gitignore is extended even outside a
+  repo; `.gitignore`-as-a-directory is a hard error. 10 test funcs in
+  gitignore_test.go (created/appended/newline-glue/dedup-variants/non-git
+  skip/non-git-existing-file extend/ancestor repo/worktree `.git` file/
+  second-run no-op/dir error). Second-run no-op already covers the
+  .gitignore slice of T05.
 - `gofmt -l` clean, `go vet` clean, `go test ./...` PASSES (all packages).
 
 ## Toolchain baseline (verified on this machine, 2026-06-10)
@@ -69,22 +82,19 @@ NOT a violation; only new entries/mtime changes caused by our work are.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 2, second item: init `.gitignore` handling (TEST_MATRIX T07; spec
-FABLE_PLAN §12 + §25, IMPLEMENTATION_PLAN §4). In runInit, after layout
-creation:
-1. add `.agentmod/` to `<cwd>/.gitignore` — create the file if missing;
-   dedup: skip if a line already equals `.agentmod/` (also accept existing
-   `.agentmod` without slash as covering — decide and record);
-2. preserve user content byte-for-byte except the appended line (append
-   with leading newline only if file lacks trailing newline);
-3. no-git-repo grace: still safe to write .gitignore? Check FABLE_PLAN §12
-   wording ("behave gracefully when the directory is not a git repo") —
-   likely: skip silently or note it; decide, record in DECISIONS.md;
-   detect via `.git` existence at cwd, NOT by running git (no exec).
-4. extend init output with a `.gitignore:` line; tests: created/appended/
-   deduped/non-git cases + byte-preservation of surrounding content.
-Keep run-twice byte-identical (T05 territory) in mind: dedup must make the
-second run a no-op.
+Phase 2, third item: init idempotency guarantee tests (TEST_MATRIX T05).
+Much is already covered piecemeal (re-init no-clobber in init_test.go,
+.gitignore second-run no-op in gitignore_test.go); T05 wants one holistic
+test: run init twice in a git repo, snapshot the FULL tree state (every
+file's bytes + the dir set under cwd and .agentmod) after run 1 and assert
+run 2 changes nothing and its stdout reports all-already-present
+("already initialized", "left untouched" ×2, "already covers"). The
+"no dup rc block" slice of T05 cannot be tested until the rc editor (T08)
+exists — mark T05 🟡 with a note, or tick it and fold the rc slice into
+T08's row (decide; rc-block idempotency is listed in T08 anyway).
+Implementation should need NO product-code changes — if run 2 mutates
+anything, that's a bug to fix this iteration. Then move to init flags
+(--no-shell-hook, --yes) per TASKS.md.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

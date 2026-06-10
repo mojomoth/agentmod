@@ -132,3 +132,16 @@ auth). **Repo detection** is a lexical upward walk for a `.git` entry of any
 file type (dir = normal repo, file = worktree/submodule), never exec'ing
 git — consistent with D011 discovery. `.gitignore` existing as a directory
 is a hard error, like `.agentmod`-as-a-file in D013.
+
+## D015 — 2026-06-10 — loop.sh rate-limit backoff (harness, run 2)
+Run 1 hit the Claude session usage limit after iteration 7; iterations 8–25
+each failed in ~1s ("You've hit your session limit · resets 7:50pm") and
+burned the whole iteration budget in seconds, ending the run with exit 1.
+Fix (commit 2cb5ed3): loop.sh now detects a rate-limited attempt (nonzero
+exit + log < 2000 bytes + limit-message grep), sleeps 15 minutes, and retries
+WITHOUT consuming an iteration, bounded by
+AGENTMOD_LOOP_MAX_RATELIMIT_SLEEPS (default 48 ≈ 12h) — still never
+unbounded. Run 1's garbage logs archived to reports/run1-ratelimited/.
+Run 2 launched with AGENTMOD_LOOP_MAX_ITERS=60: ~36 tasks remained and run 1
+averaged exactly one task per productive iteration; the 25 default was sized
+before the task count was known.

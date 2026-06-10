@@ -17,16 +17,50 @@ import (
 // valid starting point the user can extend.
 const opencodeStub = "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\n"
 
+// initOptions carries the parsed `agentmod init` flags (FABLE_PLAN §12).
+// Later steps consume these: the rc-file editor (T08) honors NoShellHook,
+// and the auth bootstrap (Phase 3) honors NonInteractive by never prompting
+// and never copying auth.
+type initOptions struct {
+	// NoShellHook skips all rc-file modification.
+	NoShellHook bool
+	// NonInteractive (--yes / --non-interactive) means: never prompt,
+	// never copy auth. Init reads nothing from stdin in this mode — and,
+	// today, in any mode.
+	NonInteractive bool
+}
+
+// parseInitFlags accepts only the documented init flags. Anything else —
+// unknown flag or positional argument — is an error naming the offender.
+func parseInitFlags(args []string) (initOptions, error) {
+	var opts initOptions
+	for _, arg := range args {
+		switch arg {
+		case "--no-shell-hook":
+			opts.NoShellHook = true
+		case "--yes", "--non-interactive":
+			opts.NonInteractive = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return opts, fmt.Errorf("unknown flag %q for init (valid: --no-shell-hook, --yes, --non-interactive)", arg)
+			}
+			return opts, fmt.Errorf("init takes no positional arguments (got %q)", arg)
+		}
+	}
+	return opts, nil
+}
+
 // runInit implements the layout-creating core of `agentmod init`
 // (FABLE_PLAN §12, IMPLEMENTATION_PLAN §4): the .agentmod/ tree,
 // agentmod.toml with defaults, the opencode.json stub, and the .gitignore
 // entry, always at the current directory. It never deletes or overwrites
 // anything that exists, so re-running is safe and only fills gaps.
-// Shell-hook installation and flags land as separate steps and are not
-// handled here yet.
+// Shell-hook installation itself is a later step (T08); the flags that
+// control it are already parsed and reported here.
 func runInit(args []string, stdout, stderr io.Writer, env Env) int {
-	if len(args) > 0 {
-		fmt.Fprintf(stderr, "agentmod: init takes no arguments yet (got %q)\n", strings.Join(args, " "))
+	opts, err := parseInitFlags(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "agentmod: %v\n", err)
 		return ExitError
 	}
 	cwd, err := env.Getwd()
@@ -98,8 +132,16 @@ func runInit(args []string, stdout, stderr io.Writer, env Env) int {
 	fmt.Fprintf(stdout, "  agentmod.toml:   %s\n", describeWrite(wroteConfig, "defaults"))
 	fmt.Fprintf(stdout, "  opencode.json:   %s\n", describeWrite(wroteStub, "stub"))
 	fmt.Fprintf(stdout, "  .gitignore:      %s\n", gitignoreStatus)
+	fmt.Fprintf(stdout, "  Shell hook:      %s\n", describeShellHook(opts))
 	fmt.Fprintf(stdout, "Run 'agentmod status' to see where agent homes will route.\n")
 	return ExitOK
+}
+
+func describeShellHook(opts initOptions) string {
+	if opts.NoShellHook {
+		return "skipped (--no-shell-hook)"
+	}
+	return "not installed yet (rc-file setup lands with 'agentmod hook zsh')"
 }
 
 // writeIfAbsent creates path with data only when no file exists there.

@@ -13,10 +13,10 @@ import (
 	"github.com/agentmod/agentmod/internal/project"
 )
 
-func runInitForTest(t *testing.T, cwd string) (code int, stdout, stderr string) {
+func runInitForTest(t *testing.T, cwd string, flags ...string) (code int, stdout, stderr string) {
 	t.Helper()
 	var out, errBuf bytes.Buffer
-	code = run([]string{"init"}, &out, &errBuf, fakeEnv(cwd, nil))
+	code = run(append([]string{"init"}, flags...), &out, &errBuf, fakeEnv(cwd, nil))
 	return code, out.String(), errBuf.String()
 }
 
@@ -248,10 +248,90 @@ func TestInitSecondRunIsNoOp(t *testing.T) {
 }
 
 func TestInitRejectsArguments(t *testing.T) {
-	var out, errBuf bytes.Buffer
-	code := run([]string{"init", "--bogus"}, &out, &errBuf, fakeEnv(t.TempDir(), nil))
-	if code != ExitError {
-		t.Fatalf("exit = %d, want %d", code, ExitError)
+	for name, args := range map[string][]string{
+		"unknown flag":   {"--bogus"},
+		"positional arg": {"somedir"},
+		"known + bogus":  {"--no-shell-hook", "--bogus"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			code, _, stderr := runInitForTest(t, root, args...)
+			if code != ExitError {
+				t.Fatalf("exit = %d, want %d", code, ExitError)
+			}
+			wantContains(t, "stderr", stderr, args[len(args)-1])
+			// A rejected invocation must not have started initializing.
+			if _, err := os.Stat(filepath.Join(root, ".agentmod")); !os.IsNotExist(err) {
+				t.Errorf(".agentmod created despite rejected arguments (stat err = %v)", err)
+			}
+		})
 	}
-	wantContains(t, "stderr", errBuf.String(), "--bogus")
+}
+
+func TestInitFlagNoShellHook(t *testing.T) {
+	code, stdout, stderr := runInitForTest(t, t.TempDir(), "--no-shell-hook")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d; stderr:\n%s", code, ExitOK, stderr)
+	}
+	wantContains(t, "stdout", stdout, "Shell hook:      skipped (--no-shell-hook)")
+}
+
+func TestInitDefaultShellHookLine(t *testing.T) {
+	code, stdout, _ := runInitForTest(t, t.TempDir())
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d", code, ExitOK)
+	}
+	wantContains(t, "stdout", stdout, "Shell hook:      not installed yet")
+	if strings.Contains(stdout, "skipped (--no-shell-hook)") {
+		t.Errorf("plain init claims the hook was skipped:\n%s", stdout)
+	}
+}
+
+// TestInitFlagsBuildIdenticalTree locks in that the T06 flags only change
+// reporting (and, later, rc/auth side effects that live OUTSIDE the project
+// tree): the .agentmod/ tree and .gitignore they produce are byte-identical
+// to a plain init's. Prompting needs no assertion beyond this: runInit has
+// no stdin parameter at all, so no flag combination can read input.
+func TestInitFlagsBuildIdenticalTree(t *testing.T) {
+	freshRepo := func() string {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return root
+	}
+
+	plainRoot := freshRepo()
+	if code, _, stderr := runInitForTest(t, plainRoot); code != ExitOK {
+		t.Fatalf("plain init: exit = %d; stderr:\n%s", code, stderr)
+	}
+	want := snapshotTree(t, plainRoot)
+
+	for name, flags := range map[string][]string{
+		"--yes":             {"--yes"},
+		"--non-interactive": {"--non-interactive"},
+		"--no-shell-hook":   {"--no-shell-hook"},
+		"all combined":      {"--no-shell-hook", "--yes", "--non-interactive"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := freshRepo()
+			code, _, stderr := runInitForTest(t, root, flags...)
+			if code != ExitOK {
+				t.Fatalf("exit = %d, want %d; stderr:\n%s", code, ExitOK, stderr)
+			}
+			got := snapshotTree(t, root)
+			for rel, w := range want {
+				if g, ok := got[rel]; !ok {
+					t.Errorf("flagged init missing %s", rel)
+				} else if g != w {
+					t.Errorf("flagged init differs at %s:\ngot:  %q\nwant: %q", rel, g, w)
+				}
+			}
+			for rel := range got {
+				if _, ok := want[rel]; !ok {
+					t.Errorf("flagged init created extra %s", rel)
+				}
+			}
+		})
+	}
 }

@@ -1,6 +1,6 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-10 (iteration: Phase 2 task 3 — init idempotency holistic test, T05)
+Last updated: 2026-06-10 (iteration: Phase 2 task 4 — init flags --no-shell-hook/--yes, T06)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 items 1–3 LANDED.
@@ -71,6 +71,27 @@ Last updated: 2026-06-10 (iteration: Phase 2 task 3 — init idempotency holisti
   true no-op. Decision: T05 ticked ✅; its "no dup rc block" slice is folded
   into T08's matrix row (rc editor doesn't exist yet; T08 already lists
   rc-block idempotency).
+- init flags LANDED and green (T06 ✅): `parseInitFlags` + `initOptions`
+  struct in init.go. NOTE: the code was written by a prior iteration that got
+  rate-limited mid-task before committing; this iteration verified it green,
+  did the bookkeeping, and committed it.
+  - Accepted: `--no-shell-hook`, `--yes`, `--non-interactive` (last two are
+    synonyms → opts.NonInteractive). Unknown flag / positional arg →
+    ExitError naming the offender, and init does NOT start creating anything
+    (parse happens before any FS work — tested).
+  - Output gained a `Shell hook:` line: "skipped (--no-shell-hook)" vs
+    "not installed yet (rc-file setup lands with 'agentmod hook zsh')".
+    T08's rc editor must consume `initOptions` (already threaded through
+    runInit) and replace that placeholder.
+  - `TestInitFlagsBuildIdenticalTree` proves every flag combo builds a
+    byte-identical tree to plain init (snapshotTree reuse). No-prompt needs
+    no test: runInit has no stdin parameter, so no code path can read input.
+  - Honest scope: rc-skip ENFORCEMENT is T08's matrix row; auth-never-copy
+    is Phase 3's. Both flags are parsed, validated, reported, and threaded
+    NOW so those tasks only consume them.
+- `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
+  logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
+  not matched by the original one-level pattern and polluted git status.
 - `gofmt -l` clean, `go vet` clean, `go test ./...` PASSES (all packages).
 
 ## Toolchain baseline (verified on this machine, 2026-06-10)
@@ -89,29 +110,30 @@ drwxr-xr-x 10 jeongyounglee staff  320  4월 30 13:53:29 2026 ~/.config/opencode
 entries: `gstack`, `gstack-upgrade`, `open-gstack-browser` (D010). These are
 NOT a violation; only new entries/mtime changes caused by our work are.
 
+2026-06-10 audit note: `~/.codex` mtime drifted to `6월 10 22:22` — inspected
+contents: churn is codex-cli's OWN runtime files from the user's interactive
+use (history.jsonl, logs_2.sqlite*, config.toml, shell_snapshots, …); zero
+agentmod-named artifacts. Not our work, not a violation. Expect this dir's
+mtime to keep moving; audit by looking for agentmod-created entries, not by
+mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
+
 ## Failing tests
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 2, fourth item: init flags `--no-shell-hook` and `--yes` /
-`--non-interactive` (TEST_MATRIX T06, FABLE_PLAN §12 lines ~389-390).
-Current init REJECTS all args ("init takes no arguments yet" in
-init.go runInit) — replace that with a small flag parser (stdlib only,
-unknown flags still error citing the flag). Semantics to implement NOW:
-flags are accepted, recorded, and validated; `--no-shell-hook` must skip
-rc-file modification and `--yes` must never prompt / never copy auth —
-but rc editing (T08) and auth bootstrap (Phase 3) don't exist yet, so
-the honest current behavior is: flags parse, are reflected in init
-output (e.g. "Shell hook: skipped (--no-shell-hook)" vs a
-not-yet-implemented placeholder line), and tests lock in: both flags
-accepted singly/together, unknown flag still ExitError naming it,
-`--yes` produces zero prompts (init currently never prompts — assert
-no reads from stdin by passing no stdin), behavior identical otherwise
-(reuse snapshotTree to show flagged init builds the same tree). Thread
-the parsed options through runInit's signature (struct, not bools) so
-T08 can consume them. Keep TestInitRejectsArguments but update it to a
-genuinely-unknown flag. Then move to `agentmod hook zsh` + `agentmod
-env` per TASKS.md.
+Phase 2, fifth item: `agentmod hook zsh` + `agentmod env` transition
+logic (TASKS.md Phase 2; FABLE_PLAN §10-§11, IMPLEMENTATION_PLAN
+routing/shell sections). Read those spec sections FIRST, then slice
+small — suggested first slice: `agentmod env` computing the
+activate/deactivate variable set (pure function over project.Discover +
+config: CLAUDE_CONFIG_DIR, CODEX_HOME, OPENCODE_CONFIG, optional XDG,
+Node-family cache vars, AGENTMOD_ACTIVE/AGENTMOD_PROJECT_ROOT
+bookkeeping) with table tests for inside-project / outside / disabled
+agents / XDG opt-in / stale-activation transitions, BEFORE emitting any
+zsh-specific hook text. The zsh hook emitter (`agentmod hook zsh`,
+precmd/chpwd-based, self-contained, no shims, full unset on exit, no
+dup PATH) builds on that. rc-file editing stays T08 — `hook zsh` only
+PRINTS the snippet to stdout.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

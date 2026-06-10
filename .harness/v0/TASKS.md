@@ -23,7 +23,7 @@ Add/split items freely; keep units small.
 - [x] init: .agentmod/ layout + agentmod.toml writer (+ tests)
 - [x] init: .gitignore add w/ dedup + no-git-repo grace (+ tests)
 - [x] init: idempotency guarantee tests (run twice, byte-identical results)
-- [ ] init: flags --no-shell-hook, --yes/non-interactive (+ tests)
+- [x] init: flags --no-shell-hook, --yes/non-interactive (+ tests)
 - [ ] `agentmod hook zsh` + `agentmod env` transition logic (+ tests)
 - [ ] `agentmod hook bash` (+ tests)
 - [ ] rc fenced-block insert/update, never duplicate, never touch user content (+ tests)

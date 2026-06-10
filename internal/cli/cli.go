@@ -26,6 +26,8 @@ Usage:
 
 Commands:
   init       create .agentmod/ with agent homes and default config here
+             (--no-shell-hook skips rc edits; --yes/--non-interactive
+              never prompts, never copies auth)
   status     show whether AgentMod is active here and where agent homes route
   version    print version and exit
   help       show this help

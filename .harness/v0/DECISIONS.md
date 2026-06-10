@@ -383,3 +383,32 @@ routed, so neither leak exists). Broken config = defaults (enabled, partial).
   "cannot locate". Helpers: `globalOpencodeDataDir` /
   `globalOpencodeConfigPath` / `opencodeConfigKeys` in doctor.go; reuse
   them when the handoff exclusion engine needs the same paths.
+
+## D025 — 2026-06-11 — doctor slice 5: Keychain note + gstack state; Env.GOOS
+(read with D021–D024; exit semantics unchanged)
+- **`Env` gained `GOOS string`** (osEnv sets runtime.GOOS): platform-gated
+  findings read it, never runtime.GOOS directly — same injection philosophy
+  as Getwd/LookupEnv. fakeEnv leaves it "" (= not-darwin), so every existing
+  test is deterministic on any host; tests wanting darwin set it explicitly.
+  Future platform-conditional code must use env.GOOS too.
+- **Keychain note** (`keychainFindings`, label "Claude auth (macOS)"): on
+  darwin + inside a project + claude routing enabled (broken config =
+  defaults), an ok-level finding states §15.1 — auth lives in the shared
+  system Keychain, no per-project account isolation is possible, no
+  per-project re-login needed. ok because it is a platform fact, not a
+  problem; absent entirely off darwin / outside a project / claude disabled
+  (skip-when-moot, same pattern as D024's opencode findings).
+- **gstack global risk** (label "gstack (global)", §23 must-warn): warns
+  whenever `$HOME/.claude/skills/gstack` exists — in AND out of projects,
+  no out-of-project downgrade: a global gstack affects every project, it is
+  a real pollution condition, not a fresh-machine default (so D021's
+  "fresh machine exits 0" still holds — fresh machines don't have it).
+  Lstat, not Stat: a stray file or dangling symlink counts. HOME comes from
+  injected Env only; HOME unset → ok "cannot locate".
+- **gstack project state** (label "gstack (project)", inside project only):
+  `.agentmod/claude/skills/gstack` dir → ok installed; absent → ok
+  not-installed (installing gstack is optional; remedy names
+  `agentmod install gstack`, which Phase 4 ships); non-directory → warn.
+  Reported regardless of claude.enabled — what sits in the project-local
+  skills dir is a fact either way. Path constants `gstackRelGlobal` /
+  `gstackRelProject` in doctor.go — Phase 4's installer must reuse them.

@@ -1,12 +1,13 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 3 — doctor slice 4:
-OpenCode partial-isolation + merge-chain leak warnings)
+Last updated: 2026-06-11 (iteration: Phase 3 — doctor slice 5:
+macOS Keychain note + gstack global/project state; Env.GOOS injection)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
   both shell hooks + rc editor + env-hygiene integration tests + the
-  first-session diagnosis). Phase 3 STARTED: doctor slice 1 landed.
+  first-session diagnosis). Phase 3 IN PROGRESS: all five doctor slices
+  done; guard + auth copy-on-consent remain.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -285,6 +286,29 @@ OpenCode partial-isolation + merge-chain leak warnings)
     builds routing vars from config.Default(), so overlay
     `routing.Vars(agentmodDir, cfg)` on top when the project cfg enables
     XDG, or misroutedVars warns.
+- doctor slice 5 LANDED and green (Phase 3 item 5 ✅, D025): macOS Keychain
+  note + gstack global/project findings, read-only, exit contract unchanged.
+  Read D021–D025 before extending doctor.
+  - `Env` struct (status.go) gained `GOOS string`; osEnv() fills
+    runtime.GOOS; fakeEnv leaves "" (= not-darwin) so all tests are
+    host-independent — tests wanting darwin set env.GOOS explicitly. ALL
+    future platform-conditional code must read env.GOOS, not runtime.GOOS.
+  - "Claude auth (macOS)" (keychainFindings): ok-level §15.1 statement
+    (shared Keychain, no per-project account isolation, no re-login) on
+    darwin + in-project + claude enabled; otherwise no line at all
+    (skip-when-moot, D024 pattern). Broken config = defaults.
+  - "gstack (global)": warns whenever $HOME/.claude/skills/gstack exists
+    (Lstat — file/symlink/dir all count), in AND out of project — no
+    out-of-project downgrade, it is a real §23 pollution risk, not a
+    fresh-machine default. HOME unset → ok "cannot locate". NOTE: doctor on
+    THIS dev machine correctly warns (the user's own global gstack, D010).
+  - "gstack (project)" (inside project only): installed / not-installed
+    both ok ("agentmod install gstack" named as remedy — Phase 4 ships it);
+    non-directory entry warns. Not gated on claude.enabled.
+  - Path constants gstackRelGlobal/gstackRelProject in doctor.go — the
+    Phase 4 installer MUST reuse them. 7 new test funcs in doctor_test.go;
+    TestDoctorAllHealthy asserts the two new gstack ok lines (no Keychain
+    line there — fakeEnv GOOS is "").
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -317,22 +341,24 @@ mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 3 fifth item: "doctor: macOS Keychain note; gstack global-risk
-check" (TASKS.md Phase 3 top unchecked). Before writing code:
-- Read D021–D024 (doctor structure/severity/exit contract); extend the
-  findings list in doctor.go, do NOT change exit semantics.
-- Keychain note (§15.1/§3.1): on darwin, Claude auth lives in the shared
-  macOS Keychain — no per-project account isolation; doctor should STATE
-  this (ok-level, it is a platform fact, not a problem; decide how to
-  gate on GOOS so tests can fake it — likely inject the OS string rather
-  than reading runtime.GOOS directly, same philosophy as Env).
-- gstack (§16/§23 must-warn): warn when global `~/.claude/skills/gstack`
-  exists (resolve via injected Env HOME — read-only stat); also report
-  project-local gstack install state (.agentmod/claude/skills/gstack
-  present/absent, ok-level both ways — install command is Phase 4).
-- Tests: fakeEnv with temp HOME containing a fake ~/.claude/skills/gstack
-  dir (positive) and without (negative); Keychain note assertion must not
-  break on linux CI — gate or inject GOOS.
+Phase 3 sixth item: "guard claude-bash: stdin contract, deny rules,
+fail-safe (+ table tests)" (TASKS.md Phase 3 top unchecked, T16). Before
+writing code:
+- Read FABLE_PLAN §17 (targets/behaviors/cautions) and §3.1 (the VERIFIED
+  PreToolUse stdin contract — implement against it, do not re-derive).
+- New subcommand `agentmod guard claude-bash` (§19): reads the hook JSON
+  from stdin, extracts the Bash command, denies high-write-likelihood
+  commands targeting global agent homes (~/.claude, ~/.codex,
+  ~/.config/opencode incl. skills/plugins subpaths); never blanket-blocks
+  reads. Unparseable stdin → fail SAFE: deny only global-path writes,
+  never block everything (§17). Decide deny mechanism per §3.1 contract
+  (exit 2 + stderr vs JSON permissionDecision — check what §3.1 verified).
+- HOME for target resolution from injected Env (GOOS too if any path is
+  platform-specific). Table tests per T16: rm/cp/mv/mkdir/clone/redirect
+  into global homes blocked; reads allowed; project-local writes allowed;
+  unparseable-input fail-safe; both deny modes if both exist.
+- Wiring guard into .agentmod/claude/settings.json is the NEXT task
+  (T17) — keep this one to the guard executable itself.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

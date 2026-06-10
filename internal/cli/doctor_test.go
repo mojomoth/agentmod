@@ -100,6 +100,8 @@ func TestDoctorAllHealthy(t *testing.T) {
 	wantLevel(t, findingLine(t, stdout, "OpenCode sessions"), diagOK)
 	wantLevel(t, findingLine(t, stdout, "OpenCode merge chain"), diagOK)
 	wantLevel(t, findingLine(t, stdout, "Agent binaries"), diagOK)
+	wantLevel(t, findingLine(t, stdout, "gstack (global)"), diagOK)
+	wantLevel(t, findingLine(t, stdout, "gstack (project)"), diagOK)
 	wantContains(t, "Project line", findingLine(t, stdout, "Project"), root, filepath.Join(root, ".agentmod"))
 	wantContains(t, "Routing line", findingLine(t, stdout, "Routing env"), "applied for this project")
 	wantContains(t, "PATH line", findingLine(t, stdout, "PATH"), "on PATH once")
@@ -857,6 +859,180 @@ func TestDoctorOpenCodeDisabledSkipsIsolationFindings(t *testing.T) {
 	wantNoFinding(t, stdout, "OpenCode sessions")
 	wantNoFinding(t, stdout, "OpenCode merge chain")
 	wantContains(t, "OpenCode config line", findingLine(t, stdout, "OpenCode config"), "routing disabled")
+}
+
+func TestDoctorKeychainNoteOnDarwin(t *testing.T) {
+	// The §15.1 macOS limitation is a platform fact: stated at ok level on
+	// darwin (exit stays 0), absent everywhere else. fakeEnv leaves GOOS ""
+	// (not-darwin), so each case sets it explicitly — host-independent.
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	for _, tc := range []struct {
+		goos string
+		want bool
+	}{{"darwin", true}, {"linux", false}, {"", false}} {
+		env := fakeEnv(root, healthyVars(t, root))
+		env.GOOS = tc.goos
+		code, stdout, _ := runDoctorForTest(t, env)
+		if code != ExitOK {
+			t.Fatalf("GOOS=%q: exit = %d, want %d\n%s", tc.goos, code, ExitOK, stdout)
+		}
+		if !tc.want {
+			wantNoFinding(t, stdout, "Claude auth (macOS)")
+			continue
+		}
+		line := findingLine(t, stdout, "Claude auth (macOS)")
+		wantLevel(t, line, diagOK)
+		wantContains(t, "Keychain line", line, "shared macOS Keychain",
+			"per-project account isolation is not possible")
+	}
+}
+
+func TestDoctorKeychainNoteSkippedWhenClaudeDisabled(t *testing.T) {
+	cfg := config.Default()
+	cfg.Claude.Enabled = false
+	root := makeProject(t, cfg)
+	mkLayout(t, root)
+	vars := healthyVars(t, root)
+	for _, v := range routing.Vars(filepath.Join(root, ".agentmod"), config.Default()) {
+		delete(vars, v.Name)
+	}
+	for _, v := range routing.Vars(filepath.Join(root, ".agentmod"), cfg) {
+		vars[v.Name] = v.Value
+	}
+	env := fakeEnv(root, vars)
+	env.GOOS = "darwin"
+	code, stdout, _ := runDoctorForTest(t, env)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+	}
+	wantNoFinding(t, stdout, "Claude auth (macOS)")
+}
+
+func TestDoctorKeychainNoteOutsideProjectAbsent(t *testing.T) {
+	// The limitation concerns project-local homes; outside a project there
+	// is nothing it qualifies, so no line even on darwin.
+	env := fakeEnv(t.TempDir(), map[string]string{"SHELL": "/bin/zsh", "HOME": t.TempDir()})
+	env.GOOS = "darwin"
+	code, stdout, _ := runDoctorForTest(t, env)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+	}
+	wantNoFinding(t, stdout, "Claude auth (macOS)")
+}
+
+func TestDoctorGstackGlobalExistsWarns(t *testing.T) {
+	// §23 must-warn: a global ~/.claude/skills/gstack affects every project,
+	// so it warns in AND out of a project. Lstat-based: a dir, a stray file,
+	// or a symlink (even dangling) all count as a global install.
+	for _, kind := range []string{"dir", "file", "symlink"} {
+		t.Run(kind, func(t *testing.T) {
+			home := t.TempDir()
+			skills := filepath.Join(home, ".claude", "skills")
+			if err := os.MkdirAll(skills, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(skills, "gstack")
+			var err error
+			switch kind {
+			case "dir":
+				err = os.Mkdir(path, 0o755)
+			case "file":
+				err = os.WriteFile(path, []byte("fake\n"), 0o644)
+			case "symlink":
+				err = os.Symlink(filepath.Join(home, "nowhere"), path)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			env := fakeEnv(t.TempDir(), map[string]string{"SHELL": "/bin/zsh", "HOME": home})
+			code, stdout, _ := runDoctorForTest(t, env)
+			if code != ExitValidation {
+				t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+			}
+			line := findingLine(t, stdout, "gstack (global)")
+			wantLevel(t, line, diagWarn)
+			wantContains(t, "gstack global line", line, path, "affects every project",
+				"agentmod install gstack")
+		})
+	}
+}
+
+func TestDoctorGstackGlobalAbsentInsideProjectIsOK(t *testing.T) {
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+	}
+	line := findingLine(t, stdout, "gstack (global)")
+	wantLevel(t, line, diagOK)
+	wantContains(t, "gstack global line", line, "no global install at")
+}
+
+func TestDoctorGstackGlobalHomeUnset(t *testing.T) {
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(t.TempDir(), nil))
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+	}
+	line := findingLine(t, stdout, "gstack (global)")
+	wantLevel(t, line, diagOK)
+	wantContains(t, "gstack global line", line, "HOME unset")
+}
+
+func TestDoctorGstackProjectState(t *testing.T) {
+	// Project-local install state is informational both ways (installing
+	// gstack is optional); only a non-directory entry at the install path
+	// warns. The finding only exists inside a project.
+	t.Run("not installed", func(t *testing.T) {
+		root := makeProject(t, config.Default())
+		mkLayout(t, root)
+		code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+		if code != ExitOK {
+			t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+		}
+		line := findingLine(t, stdout, "gstack (project)")
+		wantLevel(t, line, diagOK)
+		wantContains(t, "gstack project line", line, "not installed", "agentmod install gstack")
+	})
+	t.Run("installed", func(t *testing.T) {
+		root := makeProject(t, config.Default())
+		mkLayout(t, root)
+		path := filepath.Join(root, ".agentmod", "claude", "skills", "gstack")
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+		if code != ExitOK {
+			t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+		}
+		line := findingLine(t, stdout, "gstack (project)")
+		wantLevel(t, line, diagOK)
+		wantContains(t, "gstack project line", line, "installed at "+path)
+	})
+	t.Run("not a directory", func(t *testing.T) {
+		root := makeProject(t, config.Default())
+		mkLayout(t, root)
+		skills := filepath.Join(root, ".agentmod", "claude", "skills")
+		if err := os.MkdirAll(skills, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(skills, "gstack"), []byte("fake\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+		if code != ExitValidation {
+			t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+		}
+		line := findingLine(t, stdout, "gstack (project)")
+		wantLevel(t, line, diagWarn)
+		wantContains(t, "gstack project line", line, "not a directory", "move it aside")
+	})
+	t.Run("outside a project", func(t *testing.T) {
+		env := fakeEnv(t.TempDir(), map[string]string{"SHELL": "/bin/zsh", "HOME": t.TempDir()})
+		_, stdout, _ := runDoctorForTest(t, env)
+		wantNoFinding(t, stdout, "gstack (project)")
+	})
 }
 
 func TestDoctorRejectsArgs(t *testing.T) {

@@ -80,10 +80,13 @@ func runDoctor(args []string, stdout, stderr io.Writer, env Env) int {
 		}
 		findings = append(findings, layoutFinding(proj.AgentmodDir))
 		findings = append(findings, agentHomeFindings(proj, cfg, cfgOK)...)
+		findings = append(findings, keychainFindings(env, cfg, cfgOK)...)
 		findings = append(findings, opencodeIsolationFindings(cfg, cfgOK, env)...)
 		findings = append(findings, shimFinding(proj.AgentmodDir))
+		findings = append(findings, gstackProjectFinding(proj.AgentmodDir))
 	}
 	findings = append(findings, agentBinariesFinding(env))
+	findings = append(findings, gstackGlobalFinding(env))
 
 	// Shell type + rc-hook block. The skip reasons (exotic shell, no
 	// SHELL/HOME) reuse init's wording; inside a project they are warnings
@@ -169,7 +172,7 @@ func layoutFinding(agentmodDir string) finding {
 // Per-agent auth files inside the project-local homes (FABLE_PLAN §12/§15):
 // Codex keeps auth.json under CODEX_HOME; Claude keeps .credentials.json
 // under CLAUDE_CONFIG_DIR on Linux/Windows (macOS uses the shared Keychain —
-// that platform note is a separate doctor item).
+// keychainFindings states that platform note).
 const (
 	claudeAuthFile = ".credentials.json"
 	codexAuthFile  = "auth.json"
@@ -352,6 +355,64 @@ func opencodeConfigKeys(path string) ([]string, error) {
 	}
 	sort.Strings(keys)
 	return keys, nil
+}
+
+// keychainFindings states the §15.1 macOS credential limitation: Claude auth
+// lives in the shared system Keychain, which every config dir reads, so
+// per-project account isolation is impossible on macOS. A platform fact, not
+// a problem — ok-level, and doctor states it rather than pretending the
+// project-local home isolates accounts. Skipped off darwin and when claude
+// routing is disabled (the limitation is moot); broken config = defaults
+// (claude enabled), matching the other per-agent findings.
+func keychainFindings(env Env, cfg config.Config, cfgOK bool) []finding {
+	if env.GOOS != "darwin" {
+		return nil
+	}
+	if cfgOK && !cfg.Claude.Enabled {
+		return nil
+	}
+	return []finding{{diagOK, "Claude auth (macOS)",
+		"stored in the shared macOS Keychain, not in the project-local home — accounts are shared across all config dirs; per-project account isolation is not possible on macOS (no per-project re-login needed)"}}
+}
+
+// Where gstack hardcodes its global install (FABLE_PLAN §3.4), relative to
+// HOME, and where agentmod installs it project-locally (§16), relative to the
+// agentmod root.
+var gstackRelGlobal = filepath.Join(".claude", "skills", "gstack")
+var gstackRelProject = filepath.Join(layout.ClaudeDir, "skills", "gstack")
+
+// gstackGlobalFinding is §23's "Global ~/.claude/skills/gstack exists" must-
+// warn, checked in and out of projects: a global gstack install affects every
+// project on the machine, so its presence warns unconditionally (it is a real
+// pollution risk, not a fresh-machine default). Lstat, not Stat: a symlink or
+// stray file at that path is just as much a global install.
+func gstackGlobalFinding(env Env) finding {
+	home, ok := env.LookupEnv("HOME")
+	if !ok || home == "" {
+		return finding{diagOK, "gstack (global)", "cannot locate the global Claude home (HOME unset); no global install to check"}
+	}
+	path := filepath.Join(home, gstackRelGlobal)
+	if _, err := os.Lstat(path); err == nil {
+		return finding{diagWarn, "gstack (global)", fmt.Sprintf(
+			"%s exists — a global gstack affects every project on this machine; remove it and use 'agentmod install gstack' for a project-local install", path)}
+	}
+	return finding{diagOK, "gstack (global)", "no global install at " + path}
+}
+
+// gstackProjectFinding reports §23's "gstack project-local install state".
+// Present and absent are both ok-level — installing gstack is optional —
+// and the state is reported even when claude routing is disabled (whatever
+// sits in the project-local skills dir is a fact either way).
+func gstackProjectFinding(agentmodDir string) finding {
+	path := filepath.Join(agentmodDir, gstackRelProject)
+	info, err := os.Stat(path)
+	switch {
+	case err == nil && info.IsDir():
+		return finding{diagOK, "gstack (project)", "installed at " + path}
+	case err == nil:
+		return finding{diagWarn, "gstack (project)", path + " exists but is not a directory — move it aside, then run 'agentmod install gstack'"}
+	}
+	return finding{diagOK, "gstack (project)", "not installed ('agentmod install gstack' installs it project-locally)"}
 }
 
 // agentBinariesFinding reports which agent CLIs are reachable (§23 "Claude /

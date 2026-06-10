@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -16,14 +17,18 @@ import (
 )
 
 // Env carries the parts of the process environment the CLI reads, so tests
-// can substitute fakes without touching real process state.
+// can substitute fakes without touching real process state. GOOS is the
+// runtime.GOOS value, injected so platform-specific findings (the macOS
+// Keychain note) are testable on any host; fakes leave it "" (treated as
+// not-darwin) unless a test sets it explicitly.
 type Env struct {
 	Getwd     func() (string, error)
 	LookupEnv func(key string) (string, bool)
+	GOOS      string
 }
 
 func osEnv() Env {
-	return Env{Getwd: os.Getwd, LookupEnv: os.LookupEnv}
+	return Env{Getwd: os.Getwd, LookupEnv: os.LookupEnv, GOOS: runtime.GOOS}
 }
 
 // runStatus implements `agentmod status` (FABLE_PLAN §24): a brief report of

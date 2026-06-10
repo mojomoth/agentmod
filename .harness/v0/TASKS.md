@@ -32,7 +32,7 @@ Add/split items freely; keep units small.
 - [x] init: first-session limitation message + hook-active diagnosis
 
 ## Phase 3 — doctor + guard + auth
-- [ ] doctor: project/root/shell/hook/env checks (+ tests)
+- [x] doctor: project/root/shell/hook/env checks (+ tests)
 - [ ] doctor: HOME-change, shim, lingering-vars, dup-PATH warnings (+ tests)
 - [ ] doctor: per-agent home state incl. auth present / re-login needed (+ tests)
 - [ ] doctor: OpenCode partial-isolation + merge-chain leak warnings (+ tests)

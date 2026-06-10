@@ -12,6 +12,7 @@ import (
 	"github.com/agentmod/agentmod/internal/config"
 	"github.com/agentmod/agentmod/internal/layout"
 	"github.com/agentmod/agentmod/internal/project"
+	"github.com/agentmod/agentmod/internal/routing"
 )
 
 // Env carries the parts of the process environment the CLI reads, so tests
@@ -86,14 +87,26 @@ func homeLine(enabled bool, path, disabledKey string) string {
 	return path
 }
 
+// routingEnvState reads the hook's bookkeeping vars: whether routing is
+// applied in this shell and, when the hook recorded one, for which project
+// root. status and doctor classify from this single source.
+func routingEnvState(env Env) (active bool, root string, rootKnown bool) {
+	if v, ok := env.LookupEnv(routing.EnvActive); !ok || v != "1" {
+		return false, "", false
+	}
+	root, rootKnown = env.LookupEnv(routing.EnvProjectRoot)
+	return true, root, rootKnown
+}
+
 // shellRoutingState reports whether the shell hook has applied routing in
 // this shell, and for which project.
 func shellRoutingState(env Env, root string) string {
-	if v, ok := env.LookupEnv("AGENTMOD_ACTIVE"); !ok || v != "1" {
+	active, applied, known := routingEnvState(env)
+	switch {
+	case !active:
 		return "not applied in this shell (hook inactive; paths below take effect once it runs)"
-	}
-	if r, ok := env.LookupEnv("AGENTMOD_PROJECT_ROOT"); ok && r != root {
-		return fmt.Sprintf("applied for a different project (%s) — stale environment?", r)
+	case known && applied != root:
+		return fmt.Sprintf("applied for a different project (%s) — stale environment?", applied)
 	}
 	return "applied (AGENTMOD_ACTIVE=1)"
 }

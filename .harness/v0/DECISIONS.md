@@ -265,3 +265,32 @@ plain string logic on (rc outcome × AGENTMOD_* env), per FABLE_PLAN §12
 - ensureShellHook now returns `shellHookResult{Line, Action, Shell}`
   (Action adds rcSkipped); the notice is table-tested in rcfile_test.go
   (6 cases) with fakeEnv only — no real shells.
+
+## D021 — 2026-06-11 — doctor structure + exit semantics (Phase 3 slice 1)
+`agentmod doctor` lives in `internal/cli/doctor.go` (NOT a separate
+internal/doctor package yet — same precedent as init vs the planned
+internal/initcmd; extract only if a non-CLI consumer appears). Structure:
+a flat `[]finding{level, label, detail}` list; levels ok/warn/error; output
+`%5s  Label: detail` lines + a summary line. Strictly READ-ONLY.
+- **Exit codes**: 0 all-ok · 3 (ExitValidation) when ANY warn/error finding
+  · 1 only for doctor's own plumbing (args, Getwd). Broken config is a
+  FINDING (error level, stdout, keep checking) — unlike status, which
+  exits 1 on stderr; doctor's job is to keep diagnosing past breakage.
+- **Severity policy**: warn = degraded but recoverable (missing layout dirs,
+  stale/missing hook, env drift); error = agentmod cannot work around it
+  (corrupt fence, non-dir layout entry, unloadable config). Out-of-project
+  context downgrades not-installed/skip findings to ok ("fresh machine must
+  exit 0"); the SAME conditions inside a project warn.
+- **Reuse, not forks**: rc inspection via new read-only
+  `inspectRCBlock`/`locateRCBlock`/`rcFenceError` (ensureRCBlock rewritten
+  on the same primitives — write path behavior unchanged); env
+  classification via new `routingEnvState(env)` shared with
+  status.shellRoutingState; shell/rc-path detection + skip wording reuse
+  shellHookTarget verbatim; expected-var values come from routing.Vars, so
+  doctor and `agentmod env` can never disagree.
+- **Routing check depth**: when active for this root with a loadable
+  config, every routing.Vars value is compared (unset or different ⇒ warn
+  listing var names). PATH presence/dups deliberately EXCLUDED — that is
+  the next doctor task. Outside a project the routing check is skipped
+  entirely (lingering-vars warning belongs to that same next task; do not
+  print a misleading "ok" meanwhile).

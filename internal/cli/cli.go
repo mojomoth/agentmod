@@ -29,6 +29,8 @@ Commands:
              (--no-shell-hook skips rc edits; --yes/--non-interactive
               never prompts, never copies auth)
   status     show whether AgentMod is active here and where agent homes route
+  doctor     diagnose project, config, layout, shell-hook, and routing state
+             (read-only; exits 3 when problems are found)
   env        print shell code applying/undoing routing (used by the shell
              hook; --shell <zsh|bash> with --activate <root> or --deactivate)
   hook       print the shell hook script for your rc file to eval
@@ -59,6 +61,8 @@ func run(args []string, stdout, stderr io.Writer, env Env) int {
 		return runInit(args[1:], stdout, stderr, env)
 	case "status":
 		return runStatus(args[1:], stdout, stderr, env)
+	case "doctor":
+		return runDoctor(args[1:], stdout, stderr, env)
 	case "env":
 		return runEnv(args[1:], stdout, stderr, env)
 	case "hook":

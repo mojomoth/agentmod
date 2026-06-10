@@ -36,7 +36,7 @@ only when its rows are all ✅ in the Status column. Update Status as tests land
 | T26 | round-trip | create→restore on fresh tree reproduces config/skills/plugins; excluded items absent + re-login notice present | ⬜ |
 | T27 | portability | windows-style paths normalized; exec bits restored; MCP absolute paths warned/rewritten | ⬜ |
 | T28 | git handoff | --for-git output under .agentmod-handoff/; no sessions/logs/secrets/source; --include-sessions fails citing encryption; HANDOFF doc present | ⬜ |
-| T29 | doctor | each §23 warning has a positive + negative test (warn fires / stays silent) | ⬜ |
+| T29 | doctor | each §23 warning has a positive + negative test (warn fires / stays silent) | 🟡 (doctor_test.go: hook-installed-but-inactive, in-project-vars-unset, other-root stale, misrouted vars, layout missing/not-a-dir, broken config, stale/corrupt rc block, $SHELL-unset in/out, fresh-machine-clean exit 0; remaining: HOME/shim/lingering/dup-PATH, auth, OpenCode, Keychain/gstack warnings) |
 | T30 | scenarios §27 | proj00 global untouched; proj01 isolated (global plugin invisible); proj01 gstack local-only; proj02 unaffected; A→B handoff; git handoff | ⬜ |
 
 Legend: ⬜ not started · 🟡 partial · ✅ complete (tests passing)

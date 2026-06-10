@@ -144,20 +144,11 @@ const (
 	rcSkipped   = "skipped"
 )
 
-// ensureRCBlock makes path contain exactly one copy of block, fenced by the
-// agentmod markers. Absent → append (creating the file if needed); present
-// but stale → replace in place; present and current → no write at all.
-// Bytes outside the fence are never altered. A fence we cannot safely
-// rewrite (start without end, or several starts) is an error — guessing
-// risks eating user config.
-func ensureRCBlock(path, block string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return "", err
-	}
-	content := string(data)
-	lines := strings.SplitAfter(content, "\n")
-	begin, end, beginCount := -1, -1, 0
+// locateRCBlock scans rc-file lines (in strings.SplitAfter form) for the
+// agentmod fence. begin/end are line indices (-1 when absent); beginCount
+// counts start markers so callers can detect a corrupt fence.
+func locateRCBlock(lines []string) (begin, end, beginCount int) {
+	begin, end = -1, -1
 	for i, line := range lines {
 		switch strings.TrimSpace(line) {
 		case rcBeginMarker:
@@ -171,12 +162,71 @@ func ensureRCBlock(path, block string) (string, error) {
 			}
 		}
 	}
+	return begin, end, beginCount
+}
+
+// rcFenceError reports the fence shapes that cannot be safely rewritten
+// (start without end, or several starts) — guessing risks eating user
+// config, so both ensureRCBlock and doctor treat them as hard errors.
+func rcFenceError(path string, begin, end, beginCount int) error {
 	switch {
 	case beginCount > 1:
-		return "", fmt.Errorf("%s: found %d agentmod blocks; remove the extra %q fences and re-run init", path, beginCount, rcBeginMarker)
+		return fmt.Errorf("%s: found %d agentmod blocks; remove the extra %q fences and re-run init", path, beginCount, rcBeginMarker)
 	case begin != -1 && end == -1:
-		return "", fmt.Errorf("%s: agentmod block has a start marker but no %q line; repair or delete the block and re-run init", path, rcEndMarker)
-	case begin == -1:
+		return fmt.Errorf("%s: agentmod block has a start marker but no %q line; repair or delete the block and re-run init", path, rcEndMarker)
+	}
+	return nil
+}
+
+// rcBlockState is inspectRCBlock's read-only classification of the fence.
+type rcBlockState int
+
+const (
+	rcBlockAbsent  rcBlockState = iota // no fence (or no rc file at all)
+	rcBlockCurrent                     // fence present, content up to date
+	rcBlockStale                       // fence present, content differs
+)
+
+// inspectRCBlock reports what ensureRCBlock would find at path — without
+// writing anything. doctor uses it to diagnose hook installation state.
+func inspectRCBlock(path, block string) (rcBlockState, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return rcBlockAbsent, nil
+		}
+		return rcBlockAbsent, err
+	}
+	lines := strings.SplitAfter(string(data), "\n")
+	begin, end, beginCount := locateRCBlock(lines)
+	if err := rcFenceError(path, begin, end, beginCount); err != nil {
+		return rcBlockAbsent, err
+	}
+	if begin == -1 {
+		return rcBlockAbsent, nil
+	}
+	if strings.Join(lines[begin:end+1], "") == block {
+		return rcBlockCurrent, nil
+	}
+	return rcBlockStale, nil
+}
+
+// ensureRCBlock makes path contain exactly one copy of block, fenced by the
+// agentmod markers. Absent → append (creating the file if needed); present
+// but stale → replace in place; present and current → no write at all.
+// Bytes outside the fence are never altered.
+func ensureRCBlock(path, block string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	content := string(data)
+	lines := strings.SplitAfter(content, "\n")
+	begin, end, beginCount := locateRCBlock(lines)
+	if err := rcFenceError(path, begin, end, beginCount); err != nil {
+		return "", err
+	}
+	if begin == -1 {
 		var b strings.Builder
 		b.WriteString(content)
 		if content != "" && !strings.HasSuffix(content, "\n") {

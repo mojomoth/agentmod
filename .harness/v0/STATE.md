@@ -1,12 +1,12 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 2 — init first-session
-limitation message + hook-active diagnosis, T08a)
+Last updated: 2026-06-11 (iteration: Phase 3 — doctor
+project/root/shell/hook/env checks, slice 1)
 
 ## Where things stand
-- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. **Phase 2 COMPLETE** (init +
+- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
   both shell hooks + rc editor + env-hygiene integration tests + the
-  first-session diagnosis). Next up: Phase 3 (doctor + guard + auth).
+  first-session diagnosis). Phase 3 STARTED: doctor slice 1 landed.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -199,6 +199,24 @@ limitation message + hook-active diagnosis, T08a)
   quiet). TestInitHookActivationNotice: 6-case table in rcfile_test.go,
   fakeEnv only. No existing test needed changes (all stdout assertions
   are substring-based).
+- `agentmod doctor` slice 1 LANDED and green (Phase 3 item 1 ✅, D021):
+  `internal/cli/doctor.go` + doctor_test.go (13 test funcs), wired into
+  dispatcher + usage. Checks: project discovery/agentmod root, config
+  validity (error finding, keeps going — does NOT exit like status),
+  layout completeness (missing dirs warn / non-dir entry errors), shell
+  type + rc-block state (read-only), routing env (§23 warnings:
+  installed-but-inactive w/ D020 remedies, in-project-vars-unset,
+  other-root stale, per-var drift vs routing.Vars). Exit 0 clean / 3 any
+  finding / 1 plumbing. Read D021 before extending doctor.
+  - Refactors made for it (no behavior change, all old tests untouched):
+    rcfile.go gained `locateRCBlock`/`rcFenceError`/`inspectRCBlock`
+    (ensureRCBlock now built on them); status.go gained
+    `routingEnvState(env)` (shellRoutingState built on it; status now uses
+    routing.EnvActive/EnvProjectRoot constants instead of literals).
+  - Severity policy (D021): outside a project, not-installed/skip findings
+    are ok-level so a fresh machine exits 0; identical conditions inside a
+    project warn. Outside-project routing check is SKIPPED entirely —
+    lingering-vars is the next task; don't print "ok" for it meanwhile.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -231,23 +249,28 @@ mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 3 first item: "doctor: project/root/shell/hook/env checks" (TASKS.md
-Phase 3 top unchecked). Before writing code:
-- Read FABLE_PLAN §23 (doctor warning catalogue) and §24 neighborhood for
-  output conventions; doctor rows are T29 in TEST_MATRIX.md (each warning
-  needs a positive + negative test).
-- Doctor is read-only diagnosis: project discovery (reuse internal/project),
-  config load errors, .agentmod layout completeness (internal/layout),
-  rc-block presence/staleness (shellHookTarget/ensureRCBlock parsing — but
-  do NOT write; today's ensureRCBlock writes, so factor out or reimplement
-  a read-only block inspector), and env state (AGENTMOD_ACTIVE/
-  AGENTMOD_PROJECT_ROOT vs discovered root — same logic as
-  status.shellRoutingState and D020's hookActivationNotice; reuse, don't
-  fork wording a third time without need).
-- Keep slice small: this item is just project/root/shell/hook/env checks;
-  HOME-change/shim/lingering-vars/dup-PATH warnings and per-agent auth
-  state are SEPARATE TASKS.md items — don't gold-plate.
-- Everything through injected Env + temp dirs; no real shells needed.
+Phase 3 second item: "doctor: HOME-change, shim, lingering-vars, dup-PATH
+warnings" (TASKS.md Phase 3 top unchecked). Before writing code:
+- Read D021 (doctor structure/severity/exit contract) — extend the findings
+  list in doctor.go; do NOT change exit semantics.
+- Lingering vars (§23): OUTSIDE a project (or project disabled), any
+  AGENTMOD_* / routed var still set → warn. This is the routing check
+  doctor currently SKIPS outside projects — slot it exactly there.
+  routing.EnvVarsList/SavedPrefix + routing.Vars name the vars to probe.
+- Dup-PATH: count exact-match PATH entries equal to
+  routing.NodeBinDir(agentmodDir) — >1 → warn (integration_test.go's
+  countPathEntries shows the split-and-compare pattern). Likely also: when
+  active for this root + node enabled, node/bin ABSENT from PATH → warn
+  (deferred from slice 1 — note in test).
+- HOME-changed: needs a notion of "expected HOME"; the hook never touches
+  HOME, so the realistic check is AGENTMOD_SAVED_HOME existing at all or
+  HOME pointing INSIDE .agentmod → warn (decide + record in DECISIONS).
+- Shim detection: look for agent-named executables (claude/codex/opencode)
+  in .agentmod-controlled PATH dirs (node/bin) that are NOT the real
+  binaries — FABLE_PLAN §2 forbids agentmod creating them; doctor flags
+  ones created by other tools. Keep it cheap: scan node/bin only.
+- Each warning: positive + negative test (T29 row), fakeEnv + temp dirs
+  only.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

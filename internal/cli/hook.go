@@ -13,7 +13,7 @@ import (
 // wire it manually.
 func runHook(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 1 {
-		fmt.Fprintf(stderr, "agentmod: hook requires exactly one shell argument (supported: zsh)\n")
+		fmt.Fprintf(stderr, "agentmod: hook requires exactly one shell argument (supported: zsh, bash)\n")
 		return ExitError
 	}
 	switch args[0] {
@@ -21,10 +21,10 @@ func runHook(args []string, stdout, stderr io.Writer) int {
 		io.WriteString(stdout, shellhook.Zsh())
 		return ExitOK
 	case "bash":
-		fmt.Fprintf(stderr, "agentmod: the bash hook is not implemented yet (supported: zsh)\n")
-		return ExitError
+		io.WriteString(stdout, shellhook.Bash())
+		return ExitOK
 	default:
-		fmt.Fprintf(stderr, "agentmod: unsupported shell %q for hook (supported: zsh)\n", args[0])
+		fmt.Fprintf(stderr, "agentmod: unsupported shell %q for hook (supported: zsh, bash)\n", args[0])
 		return ExitError
 	}
 }

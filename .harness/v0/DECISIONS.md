@@ -198,3 +198,23 @@ editing stays T08. Beyond D007/D016, the script decides:
   prompt). Gotcha: zsh resolves its STARTING directory physically
   (/var→/private/var on macOS), so the precmd test compares against
   filepath.EvalSymlinks; `cd` keeps the logical path, matching D011.
+
+## D018 — 2026-06-10 — bash hook contract (T10)
+`agentmod hook bash` mirrors the zsh contract (D017) with bash-3.2-clean
+shell (macOS /bin/bash): no associative arrays, no ${var,,}, `local` only
+inside functions, `command -v` for binary lookup, `${dir%/*}` with an
+empty→"/" guard for the upward walk.
+- **Registration**: PROMPT_COMMAND alone (bash has no chpwd); it runs before
+  every prompt, covering both cd and new-shell-inside-project. Treated as a
+  SCALAR (bash 5.1 array PROMPT_COMMAND not supported in MVP). Dedup via
+  `case ";${PROMPT_COMMAND-};" in *";_agentmod_hook;"*)`; appended as
+  `;_agentmod_hook`, preserving any user entry. Double-eval appends once.
+- **Consequence (document in README/doctor)**: in non-interactive bash
+  scripts the hook never fires — same as direnv. Tests therefore call
+  `_agentmod_hook` explicitly after cd in non-interactive scenarios and
+  prove the PROMPT_COMMAND path with one forced-interactive (`-i`) run.
+- **Tests prefer /bin/bash** when it exists so macOS CI exercises real 3.2,
+  not a newer Homebrew bash earlier on PATH; forced-interactive bash without
+  a tty prints prompts + a job-control notice on stderr, so that test
+  asserts stdout only. bash resolves its starting dir physically when PWD is
+  not inherited (same EvalSymlinks gotcha as zsh).

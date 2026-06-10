@@ -32,9 +32,9 @@ func TestHookCommand(t *testing.T) {
 		wantStderr string
 	}{
 		{"zsh prints script", []string{"hook", "zsh"}, ExitOK, "_agentmod_hook", ""},
+		{"bash prints script", []string{"hook", "bash"}, ExitOK, "_agentmod_hook", ""},
 		{"no shell", []string{"hook"}, ExitError, "", "requires exactly one shell"},
 		{"too many args", []string{"hook", "zsh", "extra"}, ExitError, "", "requires exactly one shell"},
-		{"bash not yet", []string{"hook", "bash"}, ExitError, "", "not implemented yet"},
 		{"unsupported shell", []string{"hook", "fish"}, ExitError, "", `unsupported shell "fish"`},
 	}
 	for _, tc := range cases {

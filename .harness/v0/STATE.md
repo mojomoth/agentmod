@@ -1,10 +1,10 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-10 (iteration: Phase 2 — `agentmod hook zsh`, T09)
+Last updated: 2026-06-10 (iteration: Phase 2 — `agentmod hook bash`, T10)
 
 ## Where things stand
-- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 items 1–5 LANDED
-  + the zsh half of item 6 (bash hook is next).
+- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 items 1–7 LANDED
+  (both shell hooks done; rc fenced-block editor T08 is next).
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -122,6 +122,22 @@ Last updated: 2026-06-10 (iteration: Phase 2 — `agentmod hook zsh`, T09)
   - macOS gotcha (cost one red run): zsh resolves its STARTING dir physically
     (/var→/private/var), so start-inside-project assertions need
     filepath.EvalSymlinks; plain `cd` keeps the logical path.
+- `agentmod hook bash` LANDED and green (T10 ✅, D018): `shellhook.Bash()` +
+  hook.go bash case wired (usage/error strings now say "zsh, bash").
+  bash-3.2-clean script; PROMPT_COMMAND-only registration (no chpwd in
+  bash) with `case ";$PC;"` dedup that preserves the user's existing
+  PROMPT_COMMAND; same failed-root cache / warn-once / A→broken-B
+  deactivate contract as zsh. 7 test funcs in new hook_bash_test.go
+  (contents, `bash -n` gate, cd in/out, nested nearest-wins, interactive
+  PROMPT_COMMAND new-shell activation, warn-once, broken-config-once,
+  eval-twice-registers-once+keeps-user-entry) reusing hook_test.go's
+  fakeAgentmodBin/childEnv/lineAfter harness; requireBash prefers
+  /bin/bash so macOS tests real 3.2. Non-interactive bash never fires
+  PROMPT_COMMAND, so those tests call `_agentmod_hook` explicitly and one
+  `-i` run proves the registration path (stderr ignored there: forced-
+  interactive bash without tty prints prompts + job-control notice).
+  Known limitation for README/doctor: hook inert in non-interactive bash
+  scripts (same as direnv).
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -154,23 +170,27 @@ mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 2: `agentmod hook bash` (T10; TASKS.md Phase 2; FABLE_PLAN §14,
-IMPLEMENTATION_PLAN §7, D007, D016, D017). Mirror the zsh hook in
-internal/shellhook: same find-root walk and transition logic but in
-portable bash — register via PROMPT_COMMAND (append with dedup guard;
-bash has no chpwd, PROMPT_COMMAND alone covers both cd and new-shell
-since it runs before every prompt), `command -v` instead of
-`whence -p`, `${dir%/*}` instead of `${dir:h}` (careful: "" after
-stripping the last component means "/"), no emulate. runHook already
-has the "bash" case stubbed — replace the not-implemented error with
-shellhook.Bash(). Tests: reuse hook_test.go's harness (fakeAgentmodBin
-+ childEnv + a runBash twin of runZsh; `bash --norc --noprofile`,
-PROMPT_COMMAND fires only in interactive mode `-i`, so either run
-interactive like the precmd test or invoke the hook function directly
-after cd in non-interactive scripts). Port the same scenario set:
-cd in/out, nested nearest-wins, new-shell-inside-project, warn-once,
-broken-config-once, double-eval registration. macOS ships bash 3.2 —
-no associative arrays, no ${var,,}; keep the script bash-3.2-clean.
+Phase 2: rc fenced-block insert/update (T08; TASKS.md Phase 2 "rc
+fenced-block insert/update, never duplicate, never touch user content";
+FABLE_PLAN §14, IMPLEMENTATION_PLAN §7). This is the piece init's
+`Shell hook:` placeholder line promised: edit the USER's rc file
+(~/.zshrc for zsh, ~/.bashrc or ~/.bash_profile for bash) to add a
+fenced block that evals `agentmod hook <shell>`. Requirements:
+- Fenced markers (e.g. `# >>> agentmod >>>` / `# <<< agentmod <<<`);
+  insert if absent, update in place if present, NEVER duplicate, never
+  touch anything outside the fence; preserve file bytes around it.
+- init consumes initOptions.NoShellHook (already threaded through
+  runInit) — with the flag, report "skipped (--no-shell-hook)" and do
+  NOT edit any rc file (this is T08's enforcement matrix row from T06).
+- CRITICAL test constraint: the PreToolUse guard + LOOP rules forbid
+  touching the real user's rc files; the rc-path lookup MUST be
+  injectable (derive from Env / an explicit home parameter consumed by
+  OUR code — pattern already exists via cli.Env). Tests work on temp rc
+  files only. Decide + record in DECISIONS: which rc file per shell,
+  what the block contains (likely `eval "$(agentmod hook zsh)"` guarded
+  by `command -v agentmod`), how init picks the shell ($SHELL via Env),
+  and idempotency (T05's folded "no dup rc block" row).
+- init output replaces the "not installed yet" placeholder.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

@@ -16,7 +16,7 @@ only when its rows are all ✅ in the Status column. Update Status as tests land
 | T08 | rc fencing | block inserted once; no dup block on re-init (T05 slice); updated in place; user content byte-preserved around it | ⬜ |
 | T09a | env transitions | `agentmod env`: activate emits routed vars + saves pre-existing values; deactivate restores/unsets (perfect-inverse round-trip); switch undoes old project before new; PATH prepend deduped + stripped; disabled agents/XDG opt-in respected; quoting safe (real bash+zsh eval smoke); failures keep stdout empty; AGENTMOD_VARS names sanitized | ✅ |
 | T09 | zsh hook | scripted zsh: cd in → vars set; cd out → vars unset; new shell inside project activates (precmd); nested project nearest-wins | ✅ also: missing-binary warn-once, broken-config error-once + old-project deactivate, double-eval single registration, zsh -n syntax gate |
-| T10 | bash hook | same via PROMPT_COMMAND | ⬜ |
+| T10 | bash hook | same via PROMPT_COMMAND | ✅ real /bin/bash (3.2-clean): cd in/out, nested nearest-wins, interactive PROMPT_COMMAND new-shell activation, missing-binary warn-once, broken-config error-once + old-project deactivate, double-eval appends once + keeps user PROMPT_COMMAND, bash -n syntax gate |
 | T11 | env hygiene | no duplicate PATH entries after repeated transitions; prior user env values restored; HOME never changed; no shims created anywhere | ⬜ |
 | T12 | Claude routing | CLAUDE_CONFIG_DIR → .agentmod/claude inside; unset/restored outside | ✅ env (T09a) + real-zsh hook (T09); scenario re-check in T30 |
 | T13 | Codex routing | CODEX_HOME → .agentmod/codex inside; unset/restored outside | ✅ env (T09a) + real-zsh hook (T09); scenario re-check in T30 |

@@ -31,7 +31,8 @@ Commands:
   status     show whether AgentMod is active here and where agent homes route
   env        print shell code applying/undoing routing (used by the shell
              hook; --shell <zsh|bash> with --activate <root> or --deactivate)
-  hook       print the shell hook script for your rc file to eval (hook zsh)
+  hook       print the shell hook script for your rc file to eval
+             (hook zsh | hook bash)
   version    print version and exit
   help       show this help
 

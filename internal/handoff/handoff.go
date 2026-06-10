@@ -1,6 +1,7 @@
 // Package handoff implements .amod snapshot creation (FABLE_PLAN §18/§21,
 // IMPLEMENTATION_PLAN §12). A .amod file is a zip whose members are
-// manifest.json, inventory.json, REDACTION.md, checksums.txt, and the
+// manifest.json, inventory.json, REDACTION.md, HANDOFF.md, RESTORE.md,
+// checksums.txt, and the
 // payload tree under payload/ with forward-slash project-root-relative
 // names (payload/.agentmod/...), so restore maps members back onto the
 // project root directly. Inspect/verify/restore consume the same
@@ -328,10 +329,14 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 		return nil, fmt.Errorf("handoff create: %w", err)
 	}
 	redaction := renderRedaction(modified, opts.Version, res.Excluded, res.Findings)
+	handoffDoc := renderHandoffDoc(modified, opts.Version, opts.Platform,
+		filepath.Base(filepath.Clean(opts.ProjectRoot)), res)
+	restoreDoc := renderRestoreDoc(opts.Version)
 
 	// checksums.txt: "<sha256>  <member>" (sha256sum format) for every
-	// content-bearing member — manifest, inventory, redaction report, then
-	// payload in path order. checksums.txt cannot list itself.
+	// content-bearing member — manifest, inventory, redaction report, the
+	// human-readable documents, then payload in path order. checksums.txt
+	// cannot list itself.
 	var checksums strings.Builder
 	writeSum := func(name string, data []byte) {
 		sum := sha256.Sum256(data)
@@ -340,6 +345,8 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 	writeSum(ManifestName, manifest)
 	writeSum(InventoryName, inventory)
 	writeSum(RedactionName, redaction)
+	writeSum(HandoffDocName, handoffDoc)
+	writeSum(RestoreDocName, restoreDoc)
 	for _, e := range entries {
 		fmt.Fprintf(&checksums, "%s  %s\n", e.SHA256, e.Path)
 	}
@@ -351,6 +358,8 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 		{ManifestName, manifest},
 		{InventoryName, inventory},
 		{RedactionName, redaction},
+		{HandoffDocName, handoffDoc},
+		{RestoreDocName, restoreDoc},
 		{ChecksumsName, []byte(checksums.String())},
 	} {
 		hdr := &zip.FileHeader{Name: m.name, Method: zip.Deflate, Modified: modified}

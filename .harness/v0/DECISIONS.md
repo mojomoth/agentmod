@@ -850,3 +850,51 @@ snapshot/redaction code.
   gained a "secret scan:" line (clean / N candidate findings) + per-finding
   lines. Unsupported-arg message updated to name both flags.
 - T19 stays 🟡: HANDOFF.md/RESTORE.md are the next slice; T21 is complete.
+
+## D037 — 2026-06-11 — HANDOFF.md + RESTORE.md docs members
+
+`internal/handoff/docs.go`: `HandoffDocName`/`RestoreDocName` +
+`renderHandoffDoc`/`renderRestoreDoc`, wired into writeSnapshot. T19 ✅.
+Read D034–D036 + this before touching snapshot/docs code.
+
+- **Member position** (D034 layout): both are root zip members; write
+  order and checksums.txt order are manifest, inventory, REDACTION.md,
+  HANDOFF.md, RESTORE.md, then payload — checksums.txt last (cannot list
+  itself). The member-set, checksums-coverage, and determinism tests all
+  cover them.
+- **Renderer shape** mirrors renderRedaction: pure functions over
+  create-time data already in scope (createdAt, version, platform,
+  `filepath.Base(filepath.Clean(opts.ProjectRoot))` as the project name,
+  and the populated `*Result` for counts), so identical snapshots stay
+  byte-identical. No new Manifest fields, no new CreateOptions.
+- **HANDOFF.md** = §12's "what this is, how to restore, what's missing":
+  identity paragraph; payload size + inventory/checksums pointer; restore
+  pointer PLUS the honest note that the creating build does not implement
+  restore yet (the docs travel with the snapshot for the machine that
+  has restore); "What is missing" renders exclusion count (or the
+  explicit nothing-excluded sentence), scan summary (clean / N findings,
+  singular/plural correct via `countNoun`), auth-never-travels, and the
+  two D035 notes (gstack clone loses .git → `install gstack --force`;
+  node/bin npm symlinks dangle → reinstall global npm tools).
+- **RESTORE.md** = §12's "step-by-step restore + re-login guidance":
+  4 numbered steps (install agentmod+agents → `agentmod init` →
+  `handoff restore` with the safety properties named: checksum/schema
+  verification, backup-first, extract-only-under-.agentmod, never
+  executes anything → `agentmod doctor`), a re-login section, the macOS
+  Keychain note (§15.1 wording: shared Keychain, one login covers every
+  project), and the two D035 reinstall notes. Deliberately renders from
+  version only — restore guidance is snapshot-independent.
+- **Canonical re-login remedies MOVED to internal/handoff** (exported
+  `ClaudeReloginRemedy`/`CodexReloginRemedy` in docs.go); doctor.go's
+  unexported consts are now aliases (`claudeReloginRemedy =
+  handoff.ClaudeReloginRemedy`), so doctor findings, init's auth flow,
+  and the RESTORE.md that travels with every snapshot can never drift
+  apart. Direction matters: cli already imports handoff (no cycle);
+  handoff importing cli is impossible. All existing cli string
+  assertions pass unchanged.
+- **Tests**: docs_test.go — end-to-end content anchors for both members
+  (incl. verbatim remedy strings compared against the constants) +
+  renderer unit test pinning empty/singular/plural states of the
+  "What is missing" lines. Binary smoke: init → create → unzip both
+  docs read correctly → `shasum -a 256 -c` passes incl. both new
+  members.

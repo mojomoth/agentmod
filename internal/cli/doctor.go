@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/agentmod/agentmod/internal/config"
+	"github.com/agentmod/agentmod/internal/handoff"
 	"github.com/agentmod/agentmod/internal/layout"
 	"github.com/agentmod/agentmod/internal/project"
 	"github.com/agentmod/agentmod/internal/routing"
@@ -180,10 +181,13 @@ const (
 )
 
 // Exact re-login instructions (§12), shared by doctor's auth findings and
-// init's copy-on-consent decline/non-interactive paths (auth.go).
+// init's copy-on-consent decline/non-interactive paths (auth.go). The
+// canonical wording lives in internal/handoff, which embeds it in every
+// snapshot's RESTORE.md — aliasing keeps the live tool and the document
+// that travels with a snapshot from ever drifting apart.
 const (
-	claudeReloginRemedy = "claude may ask you to log in here; complete it once by running 'claude' inside this project"
-	codexReloginRemedy  = "re-login needed: run 'codex login' inside this project"
+	claudeReloginRemedy = handoff.ClaudeReloginRemedy
+	codexReloginRemedy  = handoff.CodexReloginRemedy
 )
 
 // agentHomeFindings reports each agent's project-local home state (§23),

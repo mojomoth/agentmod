@@ -1,7 +1,7 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 5 slice 3 — secret scan +
-REDACTION.md, D036)
+Last updated: 2026-06-11 (iteration: Phase 5 slice 4 — HANDOFF.md +
+RESTORE.md docs members, D037)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
@@ -10,9 +10,9 @@ REDACTION.md, D036)
   claude-bash + guard wiring T17 + auth copy-on-consent T15). Phase 4
   COMPLETE (install gstack clone + --force + pollution verification +
   distinct error reporting; T18 ✅). Phase 5 IN PROGRESS: slice 1 (.amod
-  writer, T19 🟡) + slice 2 (default exclusion engine, T20 ✅) + slice 3
-  (secret scan + REDACTION.md, T21 ✅) landed; next is HANDOFF + RESTORE
-  human docs generation.
+  writer) + slice 2 (default exclusion engine, T20 ✅) + slice 3 (secret
+  scan + REDACTION.md, T21 ✅) + slice 4 (HANDOFF.md + RESTORE.md docs,
+  D037; T19 now ✅) landed; next is git state metadata (T22).
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -600,6 +600,34 @@ REDACTION.md, D036)
     test. Binary smoke in /tmp passed: refusal exit 1 → --allow-findings
     exit 0 with both findings printed → REDACTION.md correct → shasum -c
     all OK (now incl. REDACTION.md).
+- HANDOFF.md + RESTORE.md docs members LANDED and green (Phase 5 slice 4 ✅,
+  D037, T19 ✅): new `internal/handoff/docs.go` (HandoffDocName/
+  RestoreDocName, renderHandoffDoc/renderRestoreDoc, countNoun pluralizer),
+  wired into writeSnapshot. Read D034–D037 before touching snapshot/docs
+  code.
+  - Both are root zip members; member + checksums.txt order is manifest,
+    inventory, REDACTION.md, HANDOFF.md, RESTORE.md, payload (checksums.txt
+    written last). Renderers are pure functions over data already in scope
+    (createdAt/version/platform, Base(Clean(ProjectRoot)) as project name,
+    populated *Result) — determinism test auto-covers them.
+  - HANDOFF.md: identity ¶, payload size, restore pointer + honest
+    "creating build does not implement restore yet" note, "What is missing"
+    (exclusion count or explicit nothing-sentence, scan clean/N summary,
+    auth-never-travels, D035's gstack-.git and node/bin-dangling notes).
+  - RESTORE.md: 4 steps (install → init → handoff restore w/ safety
+    properties named → doctor), re-login section, macOS Keychain note,
+    reinstall section (gstack --force, npm globals).
+  - Canonical re-login remedies MOVED to internal/handoff (exported
+    ClaudeReloginRemedy/CodexReloginRemedy); doctor.go's unexported consts
+    are aliases now, so doctor/init/auth wording can never drift from the
+    RESTORE.md packed into snapshots. cli imports handoff — no cycle. No
+    cli test changed (strings identical).
+  - Tests: 3 funcs in new docs_test.go (two end-to-end content-anchor
+    tests incl. verbatim-remedy comparison, one renderer unit test pinning
+    empty/singular/plural "What is missing" states); member-set test grew
+    the two names; checksums + determinism tests auto-extended. Binary
+    smoke in /tmp passed: init → create → unzip -p both docs correct →
+    `shasum -a 256 -c` all OK incl. both new members.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -628,31 +656,35 @@ agentmod-named artifacts. Not our work, not a violation. Expect this dir's
 mtime to keep moving; audit by looking for agentmod-created entries, not by
 mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
 (2026-06-11: same pattern again — `~/.codex` mtime now 6월 11 01:11, the
-other two homes and the skills list unchanged; no agentmod artifacts.)
+other two homes and the skills list unchanged; no agentmod artifacts.
+Later same day: `~/.codex` mtime 6월 11 02:28, same verdict.)
 
 ## Failing tests
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 5, fourth item: "HANDOFF + RESTORE human docs generation (+ tests)"
-— part of T19 (which then flips ✅ on the member side; the T19 row also
-needs the payload/inventory wording re-checked). Re-read IMPLEMENTATION_PLAN
-§12 + FABLE_PLAN §18 + D034–D036 before coding. Notes:
-- HANDOFF.md ("what this is, how to restore, what's missing") and
-  RESTORE.md ("step-by-step restore + re-login guidance") are root zip
-  members alongside REDACTION.md; add both to the trailing member group +
-  checksums.txt in writeSnapshot (the checksums test auto-extends, the
-  member-set test needs the two names added).
-- Render deterministically from data already in scope: manifest fields,
-  Result.Excluded/Findings counts, and the D035 docs-slice notes — the
-  gstack clone loses .git (remedy: `agentmod install gstack --force`) and
-  node/bin npm symlinks dangle (remedy: reinstall global npm tools).
-  Re-login guidance: reuse the exact wording of claudeReloginRemedy /
-  codexReloginRemedy (doctor.go) rather than inventing new phrasing.
-- Mention that restore is not implemented yet in THIS build but the docs
-  travel with the snapshot for the machine that has it.
-- Keep renderers in internal/handoff (e.g. docs.go), same shape as
-  renderRedaction(createdAt, version, …) []byte.
+Phase 5, fifth item: "git state metadata w/ sanitized remote URL, dirty
+warning (+ tests)" (T22). Re-read IMPLEMENTATION_PLAN §12+§13 + FABLE_PLAN
+§18 + D030 + D034 before coding. Notes:
+- Manifest EXTENDS with git fields (D034 contract: restore must tolerate
+  their absence — keep them omitempty / a nullable sub-struct). T22 row
+  wants: repo present?, branch, HEAD, dirty flag, status summary;
+  remote URL with credential tokens REDACTED (https://user:token@host →
+  strip the userinfo, keep host/path; test ssh + https + token forms).
+- Dirty worktree → warn, and per §13/T22 creation needs explicit consent
+  (--allow-dirty flag, same shape as --allow-findings). Decide whether
+  the no-git-repo case is silent or a manifest "git": null — record in
+  DECISIONS.
+- Collecting git state requires EXECUTING git (like install, unlike
+  doctor — D030 precedent). Use exec git with GIT_CONFIG_GLOBAL/SYSTEM
+  considerations only in TESTS (runGitFixture/makeGstackFixtureRepo in
+  install_test.go are the reusable helpers). Binary absent → metadata
+  omitted + a note, never a hard failure (handoff must work in non-git
+  projects).
+- CreateOptions likely grows the project git info or a collector hook —
+  prefer collecting in internal/cli (which has Env) and passing plain
+  data into handoff.Create, keeping internal/handoff exec-free and
+  deterministic under test.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

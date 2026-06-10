@@ -124,6 +124,7 @@ func TestCreateMembersAndPayload(t *testing.T) {
 	names := memberNames(zr)
 	for _, want := range []string{
 		ManifestName, InventoryName, ChecksumsName, RedactionName,
+		HandoffDocName, RestoreDocName,
 		"payload/.agentmod/",
 		"payload/.agentmod/agentmod.toml",
 		"payload/.agentmod/claude/",

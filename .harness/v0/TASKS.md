@@ -65,7 +65,10 @@ Add/split items freely; keep units small.
       (D036: scan.go content patterns over KEPT files only; private-key =
        hard refusal unless --allow-findings; REDACTION.md root member
        renders Excluded reasons + findings, never the matched bytes)
-- [ ] HANDOFF + RESTORE human docs generation (+ tests)
+- [x] HANDOFF + RESTORE human docs generation (+ tests)
+      (D037: docs.go renderers; root members between REDACTION.md and
+       checksums.txt; canonical re-login remedies moved to internal/handoff,
+       doctor/auth alias them; T19 flips ✅)
 - [ ] git state metadata w/ sanitized remote URL, dirty warning (+ tests)
 - [ ] inspect / verify / list / pack alias (+ tests)
 

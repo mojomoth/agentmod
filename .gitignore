@@ -1,0 +1,15 @@
+# Build artifacts
+/agentmod
+/bin/
+/dist/
+*.test
+coverage.out
+
+# Per-project agent environment (agentmod's own dogfood area)
+.agentmod/
+
+# Harness iteration logs (keep the directory, not the logs)
+.harness/v0/reports/*.log
+
+# OS noise
+.DS_Store

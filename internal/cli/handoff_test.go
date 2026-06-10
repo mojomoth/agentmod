@@ -44,6 +44,7 @@ func TestHandoffCreateDefaultOutput(t *testing.T) {
 		// the walk, so the structural exclusion is always reported here.
 		"excluded by default policy: 1 entry",
 		".agentmod/snapshots/ (snapshots-output)",
+		"secret scan: clean (no candidate patterns in packed files)",
 	)
 
 	zr, err := zip.OpenReader(wantPath)
@@ -138,6 +139,71 @@ func TestHandoffCreateReportsPolicyExclusions(t *testing.T) {
 	}
 	if !keptSettings {
 		t.Errorf("settings.json missing from snapshot payload")
+	}
+}
+
+func TestHandoffCreateHardFindingRefusedThenAllowed(t *testing.T) {
+	// Private-key material in a kept file refuses creation (exit 1, remedy
+	// on stderr); --allow-findings packs it and marks the finding on stdout
+	// and in REDACTION.md. Fixture value is obviously fake (CHECKS.md §5).
+	root := makeProject(t, config.Default())
+	codexDir := filepath.Join(root, ".agentmod", "codex")
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeKey := "-----BEGIN FAKE PRIVATE KEY-----\nFAKE-fixture-not-a-real-key\n-----END FAKE PRIVATE KEY-----\n"
+	if err := os.WriteFile(filepath.Join(codexDir, "deploy-key"), []byte(fakeKey), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	output := filepath.Join(t.TempDir(), "snap.amod")
+	code, _, stderr := runHandoffForTest(t, fakeEnv(root, nil), "create", "--output", output)
+	if code != ExitError {
+		t.Fatalf("exit = %d, want %d", code, ExitError)
+	}
+	wantContains(t, "stderr", stderr,
+		"refusing to pack",
+		".agentmod/codex/deploy-key line 1 (private-key)",
+		"--allow-findings",
+	)
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("refused create left output behind: %v", err)
+	}
+
+	code, stdout, stderr := runHandoffForTest(t, fakeEnv(root, nil), "create", "--output", output, "--allow-findings")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	wantContains(t, "stdout", stdout,
+		"secret scan: 1 candidate finding (details in REDACTION.md inside the snapshot)",
+		".agentmod/codex/deploy-key line 1 (private-key, HARD — packed because --allow-findings was given)",
+	)
+	if _, err := os.Stat(output); err != nil {
+		t.Fatalf("allowed create missing output: %v", err)
+	}
+}
+
+func TestHandoffCreateWarnFindingOnStdout(t *testing.T) {
+	// Warn-level candidates never block: exit 0, finding named on stdout.
+	root := makeProject(t, config.Default())
+	claudeDir := filepath.Join(root, ".agentmod", "claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "notes.md"), []byte("# notes\napi_key = \"FAKE-fixture-value\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "snap.amod")
+	code, stdout, stderr := runHandoffForTest(t, fakeEnv(root, nil), "create", "--output", output)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	wantContains(t, "stdout", stdout,
+		"secret scan: 1 candidate finding (details in REDACTION.md inside the snapshot)",
+		".agentmod/claude/notes.md line 2 (api-key)",
+	)
+	if strings.Contains(stdout, "FAKE-fixture-value") {
+		t.Errorf("stdout reproduces the matched secret value:\n%s", stdout)
 	}
 }
 

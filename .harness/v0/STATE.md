@@ -1,7 +1,7 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 5 slice 2 — default exclusion
-engine, D035)
+Last updated: 2026-06-11 (iteration: Phase 5 slice 3 — secret scan +
+REDACTION.md, D036)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
@@ -10,8 +10,9 @@ engine, D035)
   claude-bash + guard wiring T17 + auth copy-on-consent T15). Phase 4
   COMPLETE (install gstack clone + --force + pollution verification +
   distinct error reporting; T18 ✅). Phase 5 IN PROGRESS: slice 1 (.amod
-  writer, T19 🟡) + slice 2 (default exclusion engine, T20 ✅) landed;
-  next is the redaction report + secret-candidate scan (T21).
+  writer, T19 🟡) + slice 2 (default exclusion engine, T20 ✅) + slice 3
+  (secret scan + REDACTION.md, T21 ✅) landed; next is HANDOFF + RESTORE
+  human docs generation.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -567,6 +568,38 @@ engine, D035)
   - Docs-slice note (D035): gstack clone loses .git (reinstall via
     --force); node/bin npm symlinks dangle (lib/node_modules excluded) —
     HANDOFF.md/RESTORE.md must mention both.
+- secret-candidate scan + REDACTION.md LANDED and green (Phase 5 slice 3 ✅,
+  D036, T21 ✅): new `internal/handoff/scan.go` (ScanFinding, scanPatterns,
+  scanContent) + `internal/handoff/redaction.go` (RedactionName,
+  renderRedaction), wired into writeSnapshot. Read D034–D036 before
+  touching snapshot/scan/redaction code.
+  - §12 order pinned: only KEPT files are scanned (private key inside an
+    excluded .env → zero findings, tested). Regular-file zip path now
+    os.ReadFile (scanned bytes == packed bytes); unreadable-file error
+    still names the path.
+  - Patterns: private-key (the ONLY hard one), aws-access-key-id,
+    github-token, sk-token (20+ chars so sk-FAKE-fixture stays clean),
+    api-key/token/secret with required `[:=]` assignment context (prose
+    and tokenizer-style names never warn). One finding per (file, pattern),
+    first match line only; matched bytes never recorded anywhere.
+  - Hard findings refuse creation after the walk with one error listing
+    every path/line/pattern + the --allow-findings remedy; temp-file defer
+    keeps refusal atomic. `CreateOptions.AllowFindings` packs them, marked
+    HARD in REDACTION.md and on stdout. Warn findings never block.
+  - REDACTION.md = root zip member between inventory.json and
+    checksums.txt coverage; renders Excluded (path — ruleID: reason) +
+    findings (path/line/pattern only); explicit sentences for both empty
+    states; deterministic (byte-identical re-create re-tested with
+    findings present).
+  - CLI: `handoff create [--output PATH] [--allow-findings]`; stdout
+    gained "secret scan: clean/N candidate finding(s)" + per-finding
+    lines; unsupported-arg message names both flags (old assertion still
+    matches — substring).
+  - Tests: 7 funcs in new scan_test.go + RedactionName in the member-set
+    test + 2 new cli funcs + "secret scan: clean" in the default-output
+    test. Binary smoke in /tmp passed: refusal exit 1 → --allow-findings
+    exit 0 with both findings printed → REDACTION.md correct → shasum -c
+    all OK (now incl. REDACTION.md).
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -601,28 +634,25 @@ other two homes and the skills list unchanged; no agentmod artifacts.)
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 5, third item: "redaction report + secret-candidate scan (+ tests)"
-— T21. Re-read IMPLEMENTATION_PLAN §12 create pipeline + FABLE_PLAN §18
-before coding. Notes:
-- §12 pipeline position: scan the files that SURVIVED the exclusion
-  engine (collect → filter → scan → write). Warn-level hits are listed in
-  REDACTION.md; HARD hits (e.g. private-key material: "BEGIN … PRIVATE
-  KEY") REFUSE creation unless `--allow-findings` is passed (new flag on
-  handoff create).
-- REDACTION.md (zip member name per D034 layout) renders BOTH halves:
-  every Result.Excluded entry with its Reason (the engine was designed
-  for this — just render), and the secret-scan findings on kept files.
-  T19 stays 🟡 until HANDOFF/RESTORE docs land (separate item).
-- Scan shape: content-based candidate patterns (api[_-]?key, token,
-  secret, BEGIN PRIVATE KEY, AWS AKIA…, etc.) over kept payload files
-  during the walk or a second pass; stdlib only (D004). Record
-  path + matched-pattern (NOT the secret value itself) for the report.
-- Fixtures must use obviously-fake values (sk-FAKE-fixture, CHECKS.md §5)
-  and the hostile fixture in exclude_test.go (mkHostileFixture) is
-  reusable — its sk-FAKE auth values are EXCLUDED files, so a clean-scan
-  assertion over kept files should pass on it as-is.
-- Determinism: findings/report must be byte-stable (walk order is lexical;
-  keep it).
+Phase 5, fourth item: "HANDOFF + RESTORE human docs generation (+ tests)"
+— part of T19 (which then flips ✅ on the member side; the T19 row also
+needs the payload/inventory wording re-checked). Re-read IMPLEMENTATION_PLAN
+§12 + FABLE_PLAN §18 + D034–D036 before coding. Notes:
+- HANDOFF.md ("what this is, how to restore, what's missing") and
+  RESTORE.md ("step-by-step restore + re-login guidance") are root zip
+  members alongside REDACTION.md; add both to the trailing member group +
+  checksums.txt in writeSnapshot (the checksums test auto-extends, the
+  member-set test needs the two names added).
+- Render deterministically from data already in scope: manifest fields,
+  Result.Excluded/Findings counts, and the D035 docs-slice notes — the
+  gstack clone loses .git (remedy: `agentmod install gstack --force`) and
+  node/bin npm symlinks dangle (remedy: reinstall global npm tools).
+  Re-login guidance: reuse the exact wording of claudeReloginRemedy /
+  codexReloginRemedy (doctor.go) rather than inventing new phrasing.
+- Mention that restore is not implemented yet in THIS build but the docs
+  travel with the snapshot for the machine that has it.
+- Keep renderers in internal/handoff (e.g. docs.go), same shape as
+  renderRedaction(createdAt, version, …) []byte.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

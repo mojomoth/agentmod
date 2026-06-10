@@ -32,11 +32,13 @@ func runHandoff(args []string, stdout, stderr io.Writer, env Env) int {
 	return ExitError
 }
 
-// runHandoffCreate implements `agentmod handoff create [--output PATH]`:
-// pack this project's .agentmod/ into a .amod snapshot (handoff.Create).
-// The default output is .agentmod/snapshots/<project>-<timestamp>.amod.
+// runHandoffCreate implements `agentmod handoff create [--output PATH]
+// [--allow-findings]`: pack this project's .agentmod/ into a .amod
+// snapshot (handoff.Create). The default output is
+// .agentmod/snapshots/<project>-<timestamp>.amod.
 func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 	output := ""
+	allowFindings := false
 	for i := 0; i < len(args); i++ {
 		switch {
 		case args[i] == "--output":
@@ -46,8 +48,10 @@ func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 			}
 			i++
 			output = args[i]
+		case args[i] == "--allow-findings":
+			allowFindings = true
 		default:
-			fmt.Fprintf(stderr, "agentmod: handoff create: unsupported argument %q (only --output PATH is supported)\n", args[i])
+			fmt.Fprintf(stderr, "agentmod: handoff create: unsupported argument %q (supported: --output PATH, --allow-findings)\n", args[i])
 			return ExitError
 		}
 	}
@@ -81,11 +85,12 @@ func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 		goos = "unknown"
 	}
 	res, err := handoff.Create(handoff.CreateOptions{
-		ProjectRoot: proj.Root,
-		OutputPath:  output,
-		CreatedAt:   now,
-		Version:     Version,
-		Platform:    goos + "/" + runtime.GOARCH,
+		ProjectRoot:   proj.Root,
+		OutputPath:    output,
+		CreatedAt:     now,
+		Version:       Version,
+		Platform:      goos + "/" + runtime.GOARCH,
+		AllowFindings: allowFindings,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "agentmod: %v\n", err)
@@ -103,6 +108,21 @@ func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 	}
 	for _, e := range res.Excluded {
 		fmt.Fprintf(stdout, "    %s (%s)\n", e.Path, e.RuleID)
+	}
+	switch n := len(res.Findings); n {
+	case 0:
+		fmt.Fprintf(stdout, "  secret scan: clean (no candidate patterns in packed files)\n")
+	case 1:
+		fmt.Fprintf(stdout, "  secret scan: 1 candidate finding (details in REDACTION.md inside the snapshot)\n")
+	default:
+		fmt.Fprintf(stdout, "  secret scan: %d candidate findings (details in REDACTION.md inside the snapshot)\n", n)
+	}
+	for _, f := range res.Findings {
+		mark := ""
+		if f.Hard {
+			mark = ", HARD — packed because --allow-findings was given"
+		}
+		fmt.Fprintf(stdout, "    %s line %d (%s%s)\n", f.Path, f.Line, f.Pattern, mark)
 	}
 	fmt.Fprintf(stdout, "Verify or restore it on the target machine with 'agentmod handoff' (restore lands in a later release).\n")
 	return ExitOK

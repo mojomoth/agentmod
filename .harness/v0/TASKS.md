@@ -61,7 +61,10 @@ Add/split items freely; keep units small.
       (D035: Rule list in internal/handoff/exclude.go with per-rule
        human-readable reasons; Result.Excluded feeds the REDACTION.md slice;
        source code structurally absent until project-level payload roots)
-- [ ] redaction report + secret-candidate scan (+ tests)
+- [x] redaction report + secret-candidate scan (+ tests)
+      (D036: scan.go content patterns over KEPT files only; private-key =
+       hard refusal unless --allow-findings; REDACTION.md root member
+       renders Excluded reasons + findings, never the matched bytes)
 - [ ] HANDOFF + RESTORE human docs generation (+ tests)
 - [ ] git state metadata w/ sanitized remote URL, dirty warning (+ tests)
 - [ ] inspect / verify / list / pack alias (+ tests)

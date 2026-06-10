@@ -1,9 +1,10 @@
 // Package handoff implements .amod snapshot creation (FABLE_PLAN §18/§21,
 // IMPLEMENTATION_PLAN §12). A .amod file is a zip whose members are
-// manifest.json, inventory.json, checksums.txt, and the payload tree under
-// payload/ with forward-slash project-root-relative names
-// (payload/.agentmod/...), so restore maps members back onto the project
-// root directly. Inspect/verify/restore consume the same structures.
+// manifest.json, inventory.json, REDACTION.md, checksums.txt, and the
+// payload tree under payload/ with forward-slash project-root-relative
+// names (payload/.agentmod/...), so restore maps members back onto the
+// project root directly. Inspect/verify/restore consume the same
+// structures.
 package handoff
 
 import (
@@ -11,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -28,7 +30,7 @@ import (
 // newest restore will accept.
 const SchemaVersion = 1
 
-// Member names at the zip root.
+// Member names at the zip root. RedactionName lives in redaction.go.
 const (
 	ManifestName  = "manifest.json"
 	InventoryName = "inventory.json"
@@ -73,6 +75,10 @@ type CreateOptions struct {
 	// exclusion (the structural snapshots/ skip still applies), so the
 	// caller owns the secret-safety consequences.
 	Rules []Rule
+	// AllowFindings packs the snapshot even when the secret scan hits a
+	// HARD finding (private-key material in a kept file). Warn-level
+	// findings never block; both kinds are listed in REDACTION.md.
+	AllowFindings bool
 }
 
 // Result reports what Create wrote.
@@ -85,6 +91,11 @@ type Result struct {
 	// directory is recorded once, not per descendant. The redaction report
 	// renders this list.
 	Excluded []ExcludedEntry
+	// Findings lists every secret-candidate match the content scan made in
+	// KEPT files, in walk order (pattern order within a file). The
+	// redaction report renders this list too; hard findings only appear
+	// here when AllowFindings let creation proceed.
+	Findings []ScanFinding
 }
 
 // Create packs the project's .agentmod/ directory into a .amod snapshot.
@@ -183,14 +194,13 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 		if err != nil {
 			return err
 		}
-		name := PayloadPrefix + project.DirName
+		relProj := project.DirName
 		if rel != "." {
-			name += "/" + filepath.ToSlash(rel)
+			relProj += "/" + filepath.ToSlash(rel)
 
 			// Policy exclusions: the rule check precedes the member-kind
 			// switch, so even an irregular file with a matching name is
 			// silently dropped rather than a create-time error.
-			relProj := strings.TrimPrefix(name, PayloadPrefix)
 			for _, r := range rules {
 				if !r.Matches(relProj, d.Name(), d.IsDir()) {
 					continue
@@ -210,6 +220,7 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 				return nil
 			}
 		}
+		name := PayloadPrefix + relProj
 
 		info, err := d.Info()
 		if err != nil {
@@ -247,30 +258,31 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 			res.PayloadBytes += int64(len(target))
 			return nil
 		case d.Type().IsRegular():
+			// Read fully so the bytes that are scanned for secret
+			// candidates are exactly the bytes that land in the zip.
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			res.Findings = append(res.Findings, scanContent(relProj, data)...)
 			hdr := &zip.FileHeader{Name: name, Method: zip.Deflate, Modified: modified}
 			hdr.SetMode(info.Mode().Perm())
 			mw, err := zw.CreateHeader(hdr)
 			if err != nil {
 				return err
 			}
-			f, err := os.Open(path)
-			if err != nil {
+			if _, err := mw.Write(data); err != nil {
 				return err
 			}
-			h := sha256.New()
-			n, err := io.Copy(io.MultiWriter(mw, h), f)
-			f.Close()
-			if err != nil {
-				return fmt.Errorf("reading %s: %w", path, err)
-			}
+			sum := sha256.Sum256(data)
 			entries = append(entries, InventoryEntry{
 				Path:   name,
-				Size:   n,
-				SHA256: hex.EncodeToString(h.Sum(nil)),
+				Size:   int64(len(data)),
+				SHA256: hex.EncodeToString(sum[:]),
 				Mode:   fmt.Sprintf("%04o", info.Mode().Perm()),
 			})
 			res.PayloadFiles++
-			res.PayloadBytes += n
+			res.PayloadBytes += int64(len(data))
 			return nil
 		default:
 			return fmt.Errorf("%s is neither a regular file, directory, nor symlink (%s); remove it or hand-pack", path, info.Mode().Type())
@@ -278,6 +290,26 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 	})
 	if walkErr != nil {
 		return nil, fmt.Errorf("handoff create: %w", walkErr)
+	}
+
+	// §12 pipeline gate: hard findings refuse creation (the caller's defer
+	// removes the partial temp file) unless explicitly allowed. All hard
+	// findings are listed at once so the user fixes them in one pass.
+	if !opts.AllowFindings {
+		var refusal strings.Builder
+		for _, f := range res.Findings {
+			if !f.Hard {
+				continue
+			}
+			if refusal.Len() == 0 {
+				refusal.WriteString("handoff create: refusing to pack: the secret scan found private-key material in files the exclusion policy keeps:\n")
+			}
+			fmt.Fprintf(&refusal, "  %s line %d (%s)\n", f.Path, f.Line, f.Pattern)
+		}
+		if refusal.Len() > 0 {
+			refusal.WriteString("remove or exclude those files, or re-run with --allow-findings to pack them anyway")
+			return nil, errors.New(refusal.String())
+		}
 	}
 
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
@@ -295,10 +327,11 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 	if err != nil {
 		return nil, fmt.Errorf("handoff create: %w", err)
 	}
+	redaction := renderRedaction(modified, opts.Version, res.Excluded, res.Findings)
 
 	// checksums.txt: "<sha256>  <member>" (sha256sum format) for every
-	// content-bearing member — manifest, inventory, then payload in path
-	// order. checksums.txt cannot list itself.
+	// content-bearing member — manifest, inventory, redaction report, then
+	// payload in path order. checksums.txt cannot list itself.
 	var checksums strings.Builder
 	writeSum := func(name string, data []byte) {
 		sum := sha256.Sum256(data)
@@ -306,6 +339,7 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 	}
 	writeSum(ManifestName, manifest)
 	writeSum(InventoryName, inventory)
+	writeSum(RedactionName, redaction)
 	for _, e := range entries {
 		fmt.Fprintf(&checksums, "%s  %s\n", e.SHA256, e.Path)
 	}
@@ -316,6 +350,7 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 	}{
 		{ManifestName, manifest},
 		{InventoryName, inventory},
+		{RedactionName, redaction},
 		{ChecksumsName, []byte(checksums.String())},
 	} {
 		hdr := &zip.FileHeader{Name: m.name, Method: zip.Deflate, Modified: modified}

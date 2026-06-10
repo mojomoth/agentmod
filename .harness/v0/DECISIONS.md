@@ -806,3 +806,47 @@ code; the REDACTION.md slice renders what this records.
 - **CLI**: `handoff create` prints each excluded path with its rule ID
   (singular/plural-correct count line; "nothing" when zero) — interim
   visibility until REDACTION.md exists.
+
+## D036 — 2026-06-11 — T21: secret-candidate scan + REDACTION.md shape
+
+`internal/handoff/scan.go` (patterns + `scanContent`) and
+`internal/handoff/redaction.go` (`RedactionName` + `renderRedaction`),
+wired into the writeSnapshot walk. Read D034+D035+this before touching
+snapshot/redaction code.
+
+- **Pipeline position** (IMPLEMENTATION_PLAN §12 collect → filter → scan →
+  write): only files the exclusion engine KEPT are scanned — private-key
+  material inside an excluded `.env` neither blocks nor appears as a
+  finding (pinned by test). The regular-file zip path switched from
+  streaming io.Copy to `os.ReadFile` so the scanned bytes are exactly the
+  packed bytes; agent-env files are small enough that whole-file reads are
+  fine, and the unreadable-file error still names the path via ReadFile.
+- **Finding shape**: `ScanFinding{Path, Pattern, Line, Hard}` — Path is
+  project-root-relative like ExcludedEntry.Path; Line is the 1-based line
+  of the pattern's FIRST match; at most one finding per (file, pattern) so
+  output stays readable. The matched bytes are NEVER recorded — not in the
+  Result, not in REDACTION.md, not on stdout/stderr.
+- **Patterns** (stdlib regexp, checked in order): `private-key` (HARD:
+  `-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----`), `aws-access-key-id`
+  (AKIA/ASIA + 16), `github-token` (gh[pousr]_ + 20), `sk-token` (sk- +
+  20 — sk-FAKE-fixture stays under the bar by design), and three
+  assignment-context patterns `api-key`/`token`/`secret` that require a
+  `[:=]` after the keyword so prose ("the tokenizer", "secretary") never
+  warns. Token also requires an auth/access/refresh/bearer/session/api
+  prefix.
+- **Hard vs warn**: only private-key is hard. Hard findings refuse
+  creation AFTER the walk (all hard findings listed in one error naming
+  path/line/pattern + the `--allow-findings` remedy; the temp-file defer
+  keeps refusal atomic — nothing is left on disk). Warn findings never
+  block. `CreateOptions.AllowFindings` packs hard findings anyway; they
+  are then marked "(HARD finding; packed because --allow-findings was
+  given)" in the report and on stdout.
+- **REDACTION.md**: root zip member (D034 layout), listed in checksums.txt
+  between inventory.json and the payload, rendered deterministically from
+  Result.Excluded (path — ruleID: reason, verbatim) + Result.Findings
+  (path, line, pattern only). Both empty states render explicit sentences
+  ("Nothing was excluded…", "No secret candidates…").
+- **CLI**: `handoff create [--output PATH] [--allow-findings]`; stdout
+  gained a "secret scan:" line (clean / N candidate findings) + per-finding
+  lines. Unsupported-arg message updated to name both flags.
+- T19 stays 🟡: HANDOFF.md/RESTORE.md are the next slice; T21 is complete.

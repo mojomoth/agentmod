@@ -123,7 +123,7 @@ func TestCreateMembersAndPayload(t *testing.T) {
 	zr := openSnapshot(t, output)
 	names := memberNames(zr)
 	for _, want := range []string{
-		ManifestName, InventoryName, ChecksumsName,
+		ManifestName, InventoryName, ChecksumsName, RedactionName,
 		"payload/.agentmod/",
 		"payload/.agentmod/agentmod.toml",
 		"payload/.agentmod/claude/",

@@ -52,9 +52,10 @@ func parseInitFlags(args []string) (initOptions, error) {
 
 // runInit implements `agentmod init` (FABLE_PLAN §12, IMPLEMENTATION_PLAN
 // §4): the .agentmod/ tree, agentmod.toml with defaults, the opencode.json
-// stub, the .gitignore entry, and the fenced rc-file hook block, always at
-// the current directory. It never deletes or overwrites anything that
-// exists, so re-running is safe and only fills gaps.
+// stub, the Bash guard hook in claude/settings.json, the .gitignore entry,
+// and the fenced rc-file hook block, always at the current directory. It
+// never deletes or overwrites anything that exists, so re-running is safe
+// and only fills gaps.
 func runInit(args []string, stdout, stderr io.Writer, env Env) int {
 	opts, err := parseInitFlags(args)
 	if err != nil {
@@ -115,6 +116,11 @@ func runInit(args []string, stdout, stderr io.Writer, env Env) int {
 		fmt.Fprintf(stderr, "agentmod: %v\n", err)
 		return ExitError
 	}
+	guardStatus, err := ensureClaudeGuardHook(agentmodDir, env)
+	if err != nil {
+		fmt.Fprintf(stderr, "agentmod: %v\n", err)
+		return ExitError
+	}
 	gitignoreStatus, err := ensureGitignore(cwd)
 	if err != nil {
 		fmt.Fprintf(stderr, "agentmod: %v\n", err)
@@ -134,6 +140,7 @@ func runInit(args []string, stdout, stderr io.Writer, env Env) int {
 	fmt.Fprintf(stdout, "  Layout:          %s\n", describeCreated(created))
 	fmt.Fprintf(stdout, "  agentmod.toml:   %s\n", describeWrite(wroteConfig, "defaults"))
 	fmt.Fprintf(stdout, "  opencode.json:   %s\n", describeWrite(wroteStub, "stub"))
+	fmt.Fprintf(stdout, "  Claude guard:    %s\n", guardStatus)
 	fmt.Fprintf(stdout, "  .gitignore:      %s\n", gitignoreStatus)
 	fmt.Fprintf(stdout, "  Shell hook:      %s\n", hookRes.Line)
 	if notice := hookActivationNotice(hookRes, cwd, env); notice != "" {

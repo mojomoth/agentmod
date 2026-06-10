@@ -22,16 +22,19 @@ import (
 // Keychain note) are testable on any host; fakes leave it "" (treated as
 // not-darwin) unless a test sets it explicitly. Stdin is the process stdin
 // (consumed by `guard claude-bash`); fakes leave it nil (treated as empty)
-// unless a test sets it.
+// unless a test sets it. Executable resolves the running agentmod binary's
+// absolute path (consumed by init's guard wiring); fakes return a fixed
+// fake path so wiring is exercised without a real binary.
 type Env struct {
-	Getwd     func() (string, error)
-	LookupEnv func(key string) (string, bool)
-	GOOS      string
-	Stdin     io.Reader
+	Getwd      func() (string, error)
+	LookupEnv  func(key string) (string, bool)
+	GOOS       string
+	Stdin      io.Reader
+	Executable func() (string, error)
 }
 
 func osEnv() Env {
-	return Env{Getwd: os.Getwd, LookupEnv: os.LookupEnv, GOOS: runtime.GOOS, Stdin: os.Stdin}
+	return Env{Getwd: os.Getwd, LookupEnv: os.LookupEnv, GOOS: runtime.GOOS, Stdin: os.Stdin, Executable: os.Executable}
 }
 
 // runStatus implements `agentmod status` (FABLE_PLAN §24): a brief report of

@@ -453,3 +453,43 @@ routed, so neither leak exists). Broken config = defaults (enabled, partial).
   ignored (decide on the partial bytes); never block everything. Non-Bash
   tool_name → allow (the settings matcher is "Bash"; Write/Edit policing is
   Claude's own permission system's job, and T17 wires the matcher).
+
+## D027 — 2026-06-11 — T17: init wires guard into .agentmod/claude/settings.json
+- **Placement (FABLE_PLAN §17, restated)**: the PreToolUse hook lives in the
+  ROUTED home's settings — `.agentmod/claude/settings.json` — and NEVER in
+  the project's `.claude/settings.json` (git-shared; would impose the guard
+  on non-agentmod users). A test locks project `.claude/settings.json`
+  byte-identical through init.
+- **Code**: `ensureClaudeGuardHook(agentmodDir, env)` in new
+  `internal/cli/claudesettings.go`, called by runInit between the opencode
+  stub and ensureGitignore; init output gained a `Claude guard:` line.
+  `Env` gained `Executable func() (string, error)` (osEnv = os.Executable;
+  fakeEnv returns the fixed `/fake/bin/agentmod`, so EVERY init test
+  exercises wiring deterministically). Follow the Getwd/LookupEnv/Stdin
+  pattern for future process-introspection needs.
+- **Hook command**: `shellQuote(filepath.Clean(binPath)) + " guard
+  claude-bash"`, matcher `"Bash"`, type `"command"`. Clean matters:
+  os.Executable can return invocation-relative spellings
+  (`…/proj/../agentmod` — caught by binary smoke). EvalSymlinks is
+  deliberately NOT applied: a version-managed symlink (homebrew) is the
+  stabler reference across upgrades.
+- **Merge semantics (mirrors D019's rc discipline)**: file absent → created
+  with exactly the hook config; hook present-and-correct → ZERO writes
+  (user formatting preserved byte-identically); stale binary path →
+  command rewritten in place, no duplicate entry (`guard claude-bash`
+  substring is the ownership marker); hook absent from existing file →
+  entry appended, all user keys preserved, but the file is re-marshaled
+  (stdlib MarshalIndent, keys sorted — formatting loss only when a write
+  is needed anyway). Whitespace-only file = empty object. Invalid JSON /
+  non-object root / wrong-typed `hooks`/`hooks.PreToolUse` → hard error,
+  zero writes (like D019's corrupt fence).
+- **Unresolvable binary** (Executable nil or erroring): skip with an
+  explanatory line, exit 0, no file written — init must not fail over an
+  exotic os.Executable error, and a hook pointing nowhere would make every
+  Claude Bash call error. Re-init later wires it. The doctor finding for
+  wired/stale-binary guard state is a NEW Phase 3 task (added to TASKS.md),
+  not part of T17.
+- **Config not consulted**: init wires the guard even if claude.enabled =
+  false — the hook only fires when Claude actually runs with the routed
+  home, which is exactly when the guard should act; routing disablement is
+  the hook's natural off switch.

@@ -82,13 +82,15 @@ func TestInitReinitNeverOverwrites(t *testing.T) {
 	if err := os.WriteFile(layout.OpencodeConfigPath(agentmodDir), customStub, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// A file the layout knows nothing about must survive too.
+	// A file the layout knows nothing about must survive too. (Not
+	// claude/settings.json — since T17 that file is managed: init merges the
+	// guard hook into it, covered by claudesettings_test.go.)
 	stray := filepath.Join(agentmodDir, "claude")
 	if err := os.MkdirAll(stray, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	strayFile := filepath.Join(stray, "settings.json")
-	if err := os.WriteFile(strayFile, []byte("{}"), 0o644); err != nil {
+	strayFile := filepath.Join(stray, "user-notes.md")
+	if err := os.WriteFile(strayFile, []byte("# mine\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -101,7 +103,7 @@ func TestInitReinitNeverOverwrites(t *testing.T) {
 	for path, want := range map[string][]byte{
 		filepath.Join(agentmodDir, "agentmod.toml"): customToml,
 		layout.OpencodeConfigPath(agentmodDir):      customStub,
-		strayFile:                                   []byte("{}"),
+		strayFile:                                   []byte("# mine\n"),
 	} {
 		got, err := os.ReadFile(path)
 		if err != nil {
@@ -241,6 +243,7 @@ func TestInitSecondRunIsNoOp(t *testing.T) {
 		"already initialized",
 		"all directories already present",
 		"already covers .agentmod/",
+		"guard hook already configured",
 	)
 	if got := strings.Count(stdout, "already present, left untouched"); got != 2 {
 		t.Errorf("want 2 'left untouched' lines (agentmod.toml, opencode.json), got %d:\n%s", got, stdout)

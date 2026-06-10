@@ -38,8 +38,9 @@ Add/split items freely; keep units small.
 - [x] doctor: OpenCode partial-isolation + merge-chain leak warnings (+ tests)
 - [x] doctor: macOS Keychain note; gstack global-risk check (+ tests)
 - [x] guard claude-bash: stdin contract, deny rules, fail-safe (+ table tests)
-- [ ] init wires guard into .agentmod/claude/settings.json (+ tests)
+- [x] init wires guard into .agentmod/claude/settings.json (+ tests)
 - [ ] auth copy-on-consent: detect, prompt, copy/decline/non-interactive paths (+ tests)
+- [ ] doctor: guard hook wired / stale-binary-path finding in claude/settings.json (+ tests)
 
 ## Phase 4 — gstack
 - [ ] install gstack: clone to .agentmod/claude/skills/gstack only (+ fixture-repo tests)

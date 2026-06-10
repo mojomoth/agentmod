@@ -1,14 +1,14 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 3 — guard claude-bash engine +
-CLI, T16; Env.Stdin injection)
+Last updated: 2026-06-11 (iteration: Phase 3 — init wires guard into
+.agentmod/claude/settings.json, T17; Env.Executable injection)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
   both shell hooks + rc editor + env-hygiene integration tests + the
   first-session diagnosis). Phase 3 IN PROGRESS: all five doctor slices +
-  guard claude-bash done; guard wiring into settings.json (T17) + auth
-  copy-on-consent remain.
+  guard claude-bash + guard wiring (T17) done; auth copy-on-consent + the
+  new doctor guard-state finding remain.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -333,6 +333,30 @@ CLI, T16; Env.Stdin injection)
     + non-Bash + unparseable×5) and internal/cli (exit codes, JSON shape,
     silence on allow, nil/erroring stdin, usage errors). Binary smoke of
     all three modes done via /tmp fixture files (see caution below).
+- init guard wiring LANDED and green (T17 ✅, D027): new
+  `internal/cli/claudesettings.go` (`ensureClaudeGuardHook`), called by
+  runInit between the opencode stub and ensureGitignore; init output gained
+  a `Claude guard:` line. Read D027 before touching settings.json code.
+  - `Env` gained `Executable func() (string, error)` (osEnv = os.Executable;
+    fakeEnv returns fixed `/fake/bin/agentmod` → every init test exercises
+    wiring). Hook command = `shellQuote(filepath.Clean(bin)) + " guard
+    claude-bash"`, matcher "Bash". Clean is load-bearing: os.Executable can
+    return `…/proj/../agentmod` spellings (caught in binary smoke).
+  - Merge mirrors the rc editor's discipline: absent → create;
+    present-and-correct → ZERO writes (bytes preserved); stale binary path →
+    repaired in place via the "guard claude-bash" ownership marker (no dup
+    entries); missing-from-existing → appended with all user keys preserved
+    (stdlib re-marshal, keys sorted); whitespace-only = `{}`; invalid JSON /
+    wrong-typed hooks keys → hard error, zero writes. Unresolvable binary →
+    skip line, no file, exit 0. Project `.claude/settings.json` never
+    touched (tested byte-identical).
+  - Tests: 9 funcs in claudesettings_test.go; TestInitReinitNeverOverwrites'
+    stray file moved off claude/settings.json (now a MANAGED file) to
+    claude/user-notes.md; TestInitSecondRunIsNoOp asserts the
+    already-configured line and still proves byte-identical re-init.
+  - Follow-up task added to TASKS.md Phase 3: doctor finding for guard
+    wired/stale-binary state (IMPLEMENTATION_PLAN §11 "re-resolved by
+    doctor"; deliberately NOT part of T17, see D027).
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -365,27 +389,28 @@ mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 3 seventh item: "init wires guard into .agentmod/claude/settings.json"
-(TASKS.md Phase 3 top unchecked, T17). Before writing code:
-- Read FABLE_PLAN §17 placement paragraph (DECIDED: hook config goes in the
-  ROUTED home's settings, `.agentmod/claude/settings.json` — never the
-  project's `.claude/settings.json`) and D026 (the command contract being
-  wired).
-- init must create/merge `.agentmod/claude/settings.json` with a PreToolUse
-  hook entry: matcher "Bash" → command invoking the guard. IMPLEMENTATION_
-  PLAN §11 says reference the ABSOLUTE agentmod binary path (re-resolved by
-  doctor if the binary moved — that doctor finding can be part of T17 or a
-  follow-up; decide and record). Binary path discovery: os.Executable()
-  equivalent must be injectable for tests (extend Env, following the
-  Getwd/LookupEnv/Stdin pattern).
-- Respect init's never-overwrite discipline (D013-era guarantees): if
-  settings.json already exists, MERGE the hook entry in (or detect
-  present-and-correct = no-op) without clobbering user keys; re-init stays
-  idempotent (T05's snapshotTree test style). Decide JSON read-modify-write
-  via stdlib encoding/json.
-- Tests: fresh init writes the hook; re-init no-op; existing settings.json
-  with user keys preserved; hook command points at the resolved binary;
-  project `.claude/settings.json` NEVER touched.
+Phase 3: "auth copy-on-consent: detect, prompt, copy/decline/non-interactive
+paths" (TASKS.md Phase 3 top unchecked, T15). Before writing code:
+- Read FABLE_PLAN §12 (auth bootstrapping) + §15.1/15.2 (per-agent auth
+  files) and IMPLEMENTATION_PLAN §9 (copy-on-consent design). Doctor slice 3
+  already named the auth files: `claude/.credentials.json` (Linux path;
+  macOS auth is Keychain — copy is moot there, D025 keychain note) and
+  `codex/auth.json` — constants live in doctor.go; REUSE them (consider
+  extracting to a shared location rather than duplicating).
+- Decide where the prompt fires: as part of init (interactive mode only) per
+  the plan. `--yes`/`--non-interactive` (already threaded through
+  initOptions.NonInteractive) must NEVER prompt and NEVER copy — that
+  enforcement is THIS task's matrix row (T15). Prompt must read env.Stdin
+  (D026: never os.Stdin).
+- Consent yes → copy global auth file into the routed home (file mode 0600;
+  source = real global home located via env HOME — READ-ONLY access to
+  global homes is allowed, writes are not). Decline → print re-login
+  instructions (doctor slice 3 detail strings already have the wording).
+- Copied auth files must be in the handoff exclusion list later (T15 matrix
+  row notes this; Phase 5's exclusion engine consumes it).
+- Tests: consent-copy (fake global home via injected env), decline,
+  non-interactive never copies, missing global auth = nothing to offer,
+  macOS (env.GOOS darwin) Claude path = Keychain note instead of file copy.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

@@ -31,6 +31,11 @@ func makeProject(t *testing.T, cfg config.Config) string {
 	return root
 }
 
+// fakeBinPath is fakeEnv's stable Executable answer, so every init test
+// exercises guard wiring with a deterministic hook command and flag-combo
+// snapshots stay byte-identical across runs.
+const fakeBinPath = "/fake/bin/agentmod"
+
 // fakeEnv returns an Env reporting cwd as the working directory and vars as
 // the entire environment.
 func fakeEnv(cwd string, vars map[string]string) Env {
@@ -40,6 +45,7 @@ func fakeEnv(cwd string, vars map[string]string) Env {
 			v, ok := vars[key]
 			return v, ok
 		},
+		Executable: func() (string, error) { return fakeBinPath, nil },
 	}
 }
 

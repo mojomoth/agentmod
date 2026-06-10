@@ -1,9 +1,10 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-10 (iteration: Phase 2 task 4 — init flags --no-shell-hook/--yes, T06)
+Last updated: 2026-06-10 (iteration: Phase 2 task 5a — `agentmod env` transitions, T09a)
 
 ## Where things stand
-- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 items 1–3 LANDED.
+- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 items 1–4 LANDED
+  + the env half of item 5.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -89,6 +90,18 @@ Last updated: 2026-06-10 (iteration: Phase 2 task 4 — init flags --no-shell-ho
   - Honest scope: rc-skip ENFORCEMENT is T08's matrix row; auth-never-copy
     is Phase 3's. Both flags are parsed, validated, reported, and threaded
     NOW so those tasks only consume them.
+- `agentmod env` LANDED and green (T09a ✅, D016): new `internal/routing`
+  package (Vars(agentmodDir,cfg) in stable order, NodeBinDir, bookkeeping
+  var-name constants) + `internal/cli/env.go` (parseEnvFlags, envModel/opList
+  in-memory env modeling, appendActivate/appendDeactivate, shellQuote,
+  strip/prependPathEntry). Wired into dispatcher + usage. Contract details in
+  D016 (read it before touching env/hook code). 13 test funcs in env_test.go
+  + 4 in routing_test.go; real bash+zsh eval smoke (incl. quote-bearing
+  values, PATH strip) passed manually this iteration.
+  - Node var choices: NPM_CONFIG_PREFIX=.agentmod/node (so npm global bin ==
+    node/bin, the one managed PATH entry), NPM_CONFIG_CACHE=node/npm-cache,
+    PNPM_HOME=node/pnpm, BUN_INSTALL=node/bun. pnpm/bun global bins are NOT
+    on PATH in MVP — list under README limitations (Phase 8).
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -121,19 +134,22 @@ mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 2, fifth item: `agentmod hook zsh` + `agentmod env` transition
-logic (TASKS.md Phase 2; FABLE_PLAN §10-§11, IMPLEMENTATION_PLAN
-routing/shell sections). Read those spec sections FIRST, then slice
-small — suggested first slice: `agentmod env` computing the
-activate/deactivate variable set (pure function over project.Discover +
-config: CLAUDE_CONFIG_DIR, CODEX_HOME, OPENCODE_CONFIG, optional XDG,
-Node-family cache vars, AGENTMOD_ACTIVE/AGENTMOD_PROJECT_ROOT
-bookkeeping) with table tests for inside-project / outside / disabled
-agents / XDG opt-in / stale-activation transitions, BEFORE emitting any
-zsh-specific hook text. The zsh hook emitter (`agentmod hook zsh`,
-precmd/chpwd-based, self-contained, no shims, full unset on exit, no
-dup PATH) builds on that. rc-file editing stays T08 — `hook zsh` only
-PRINTS the snippet to stdout.
+Phase 2: `agentmod hook zsh` emitter (TASKS.md Phase 2; FABLE_PLAN §14,
+IMPLEMENTATION_PLAN §7, D007, D016). The env half is DONE — the hook
+only has to: (1) define a pure-zsh upward search for
+`.agentmod/agentmod.toml` (no binary exec on the hot path), (2) on
+precmd+chpwd detect transitions by comparing the found root against
+$AGENTMOD_PROJECT_ROOT, (3) on transition eval
+`agentmod env --shell zsh --activate <root>` / `--deactivate`
+(switching needs only --activate — env self-deactivates first, D016),
+(4) no-op with a one-time warning if the agentmod binary is missing.
+`agentmod hook zsh` PRINTS the script to stdout; rc-file editing stays
+T08. Test via scripted child zsh processes: `zsh -f` (skips user rc
+files — never touch the real ones), built test binary prepended to the
+child's PATH, script = eval "$(agentmod hook zsh)" + cd sequences +
+env assertions; the child process env may carry a temp HOME but the
+parent test process must never reassign the real HOME. bash
+(PROMPT_COMMAND) is the item after.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

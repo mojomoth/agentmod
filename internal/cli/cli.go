@@ -29,6 +29,8 @@ Commands:
              (--no-shell-hook skips rc edits; --yes/--non-interactive
               never prompts, never copies auth)
   status     show whether AgentMod is active here and where agent homes route
+  env        print shell code applying/undoing routing (used by the shell
+             hook; --shell <zsh|bash> with --activate <root> or --deactivate)
   version    print version and exit
   help       show this help
 
@@ -55,6 +57,8 @@ func run(args []string, stdout, stderr io.Writer, env Env) int {
 		return runInit(args[1:], stdout, stderr, env)
 	case "status":
 		return runStatus(args[1:], stdout, stderr, env)
+	case "env":
+		return runEnv(args[1:], stdout, stderr, env)
 	case "version", "--version":
 		fmt.Fprintf(stdout, "agentmod %s\n", Version)
 		return ExitOK

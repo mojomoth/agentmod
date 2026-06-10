@@ -145,3 +145,32 @@ unbounded. Run 1's garbage logs archived to reports/run1-ratelimited/.
 Run 2 launched with AGENTMOD_LOOP_MAX_ITERS=60: ~36 tasks remained and run 1
 averaged exactly one task per productive iteration; the 25 default was sized
 before the task count was known.
+
+## D016 — 2026-06-10 — `agentmod env` transition contract (T09a)
+`agentmod env --shell <zsh|bash> (--activate ROOT | --deactivate)` prints
+ONLY eval-able `export NAME='value'` / `unset NAME` lines (identical for both
+shells; --shell exists for future fish/pwsh divergence). All logic lives in
+Go, computed against the calling shell's real environment — the binary models
+its own emitted mutations in memory (`envModel`), so emitted shell never
+loops, branches, or re-derives state. Key semantics:
+- **AGENTMOD_VARS** records the routed var names at activation; deactivation
+  restores exactly that list, so it survives config edits/deletion while
+  inside the project. Names from the (attacker-influencable) environment are
+  validated as identifiers before being interpolated into shell code.
+- **Save/restore (D006)**: pre-existing values saved to `AGENTMOD_SAVED_<VAR>`;
+  absence of a SAVED var means "was unset" → deactivate unsets. Proven a
+  perfect inverse by a round-trip test.
+- **PATH** is strip/prepend, never save/restore: restoring a snapshot would
+  clobber PATH edits the user made while inside. Single managed entry:
+  `.agentmod/node/bin` (IMPLEMENTATION_PLAN §7). `NPM_CONFIG_PREFIX` is
+  `.agentmod/node` so npm's global bin IS that entry; pnpm/bun global bins
+  (`node/pnpm`, `node/bun/bin`) are NOT on PATH in MVP — README limitation.
+- **Activate while active** (same or different root) = implicit deactivate
+  first, computed in-memory, so switches never leak and saves never capture
+  our own routing.
+- **Failures keep stdout empty** (it gets eval'd): bad root → exit 2,
+  broken config/flags → exit 1, errors on stderr only.
+- env has NO filesystem side effects (XDG dirs under opencode/xdg are not
+  created by env; that belongs to init/doctor when opt-in mode is on).
+- Real-shell eval smoke (bash+zsh, quote-bearing values) verified manually
+  this iteration; the scripted-shell integration suite remains its own task.

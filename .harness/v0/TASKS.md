@@ -28,7 +28,7 @@ Add/split items freely; keep units small.
 - [x] `agentmod hook zsh` emitter: precmd/chpwd, pure-shell upward search, evals env on transitions (+ tests)
 - [x] `agentmod hook bash` (+ tests)
 - [x] rc fenced-block insert/update, never duplicate, never touch user content (+ tests)
-- [ ] scripted-shell integration tests: activate/deactivate/cross-project, PATH dedup, HOME untouched
+- [x] scripted-shell integration tests: activate/deactivate/cross-project, PATH dedup, HOME untouched
 - [ ] init: first-session limitation message + hook-active diagnosis
 
 ## Phase 3 — doctor + guard + auth

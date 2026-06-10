@@ -1,11 +1,12 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-10 (iteration: Phase 2 — rc fenced-block editor, T08)
+Last updated: 2026-06-11 (iteration: Phase 2 — scripted-shell integration
+tests, T11)
 
 ## Where things stand
-- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 items 1–8 LANDED
-  (init + both shell hooks + rc editor done; scripted-shell integration
-  tests T11 are next).
+- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 items 1–9 LANDED
+  (init + both shell hooks + rc editor + env-hygiene integration tests;
+  only the init first-session-limitation message remains in Phase 2).
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -156,6 +157,33 @@ Last updated: 2026-06-10 (iteration: Phase 2 — rc fenced-block editor, T08)
   selection ×3/ZDOTDIR/corrupt-fence ×2/zsh+bash -n block syntax).
   init_test.go's TestInitDefaultShellHookLine updated for the new skip
   wording ("not installed yet" placeholder no longer exists).
+- scripted-shell env-hygiene tests LANDED and green (T11 ✅): new
+  `internal/cli/integration_test.go`, `TestHookScriptedSessionEnvHygiene`
+  with a {zsh, bash} table (`shellCases()`: per-shell `run` + `cd` snippet —
+  bash appends an explicit `_agentmod_hook` since PROMPT_COMMAND never fires
+  non-interactively, D018). One scripted session per shell does
+  in→out→in→A→B(switch)→A→out and proves FABLE_PLAN §7 "perfect inverse":
+  - Full `env | sort` dumps between `===ENV0===`/`===ENDENV0===` markers
+    (parser `envSection` filters PWD/OLDPWD/SHLVL/`_`), diffed as maps —
+    catches lost/changed/leaked vars, PATH + HOME restoration, and any
+    lingering `AGENTMOD*` in one assertion set.
+  - Sentinel pre-existing values (with spaces, a single quote, and `$`) on
+    ALL routed vars + XDG_CONFIG_HOME; asserted overridden inside, restored
+    mid-trip and after; `AGENTMOD_SAVED_CLAUDE_CONFIG_DIR` equals the USER
+    original even right after the A→B switch (D016: saves never capture our
+    own routing). Quoting round-trip now automated (was manual smoke only).
+  - PATH checkpoints inside A/B count entries via exact-match split:
+    exactly one node/bin entry, always the CURRENT project's, zero dups
+    after repeated transitions.
+  - No-shims: `snapshotTree` (reused from init_test.go) over projA, projB,
+    fakeAgentmodBin dir, and the start dir before/after the session;
+    `diffTrees` reports created/removed/changed entries.
+  - Helpers added: `shellCases`/`sentinelEnv`/`envSection`/
+    `countPathEntries`/`diffTrees` — reuse them for the Phase 8 scenario
+    matrix (T30) instead of inventing new ones.
+  - Gotcha that cost one red run: section markers must differ between the
+    open and close lines for BOTH dumps — parser expects `===ENDENV0===`,
+    not `===END0===`.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -188,28 +216,23 @@ mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 2: scripted-shell integration tests (T11; TASKS.md Phase 2
-"scripted-shell integration tests: activate/deactivate/cross-project,
-PATH dedup, HOME untouched"; TEST_MATRIX T11 "env hygiene"). The hook
-tests (T09/T10) already cover single transitions per shell; T11 is the
-HYGIENE matrix on top:
-- Repeated transitions (in→out→in→…, A→B→A cross-project) leave NO
-  duplicate PATH entries — assert PATH equals the original after exit
-  and contains exactly one `.agentmod/node/bin` entry while inside.
-- Pre-existing user values of every routed var (CLAUDE_CONFIG_DIR,
-  CODEX_HOME, OPENCODE_CONFIG, NPM_CONFIG_*, PNPM_HOME, BUN_INSTALL)
-  survive a full round-trip: set sentinel values before eval'ing the
-  hook, cd through projects, cd out, compare full `env` before/after
-  (FABLE_PLAN §7 "perfect inverse — tested by scripted shell sessions
-  comparing env before/after").
-- HOME never changes at any point; no `AGENTMOD_*` remains after exit;
-  no shim files appear anywhere (scan the project + a fake bin dir).
-- Run the same matrix in BOTH zsh and bash. Reuse hook_test.go's
-  fakeAgentmodBin/childEnv/lineAfter + hook_bash_test.go's runBash
-  harness — do NOT invent a new one. Read D016/D017/D018 first.
-- Likely shape: a new integration_test.go in internal/cli with a
-  table over {zsh, bash} × scenario scripts that dump `env | sort`
-  at checkpoints and diff them in Go.
+Phase 2 final item: "init: first-session limitation message + hook-active
+diagnosis" (TASKS.md Phase 2 last unchecked). Scope per FABLE_PLAN §12/§24
+and the GOAL "first-session hook caveat":
+- After installing/updating the rc block, init must tell the user the hook
+  is NOT live in the CURRENT shell — they must `exec $SHELL`, open a new
+  terminal, or `eval "$(agentmod hook <shell>)"` once (direnv-style
+  first-session caveat; same wording later goes into README limitations).
+- Diagnosis: init can detect an already-active hook via the env it was
+  invoked with (AGENTMOD_ACTIVE / AGENTMOD_PROJECT_ROOT through the
+  injected Env — status.go already reads these; see its "Shell routing"
+  logic) and skip/soften the message when routing is already applied, or
+  note stale-root. Don't over-engineer: message choice is plain string
+  logic on (rc result × env state); table-test it in init_test.go or
+  rcfile_test.go with fakeEnv — no real shells needed.
+- Read D019 first (ensureShellHook return values) — the message likely
+  hangs off shellHookTarget/ensureRCBlock outcomes already reported on the
+  "Shell hook:" line.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/agentmod/agentmod/internal/project"
 )
@@ -34,9 +33,15 @@ func runInstall(args []string, stdout, stderr io.Writer, env Env) int {
 		fmt.Fprintf(stderr, "agentmod: unknown install component %q (only \"gstack\" is supported)\n", args[0])
 		return ExitError
 	}
-	if len(args) > 1 {
-		fmt.Fprintf(stderr, "agentmod: install gstack takes no further arguments (got %q)\n", strings.Join(args[1:], " "))
-		return ExitError
+	force := false
+	for _, a := range args[1:] {
+		switch a {
+		case "--force":
+			force = true
+		default:
+			fmt.Fprintf(stderr, "agentmod: install gstack: unsupported argument %q (only --force is supported)\n", a)
+			return ExitError
+		}
 	}
 
 	cwd, err := env.Getwd()
@@ -53,19 +58,25 @@ func runInstall(args []string, stdout, stderr io.Writer, env Env) int {
 		fmt.Fprintf(stderr, "agentmod: %v\n", err)
 		return ExitError
 	}
-	return installGstack(proj.AgentmodDir, stdout, stderr, env)
+	return installGstack(proj.AgentmodDir, force, stdout, stderr, env)
 }
 
 // installGstack clones gstack into agentmodDir/claude/skills/gstack via a
 // sibling temp dir + atomic rename, so the target only ever appears complete.
+// With force, the clone still happens FIRST; the existing install is only
+// moved aside after the clone succeeded, so a failed clone never destroys it.
 // Unlike doctor's statBinaryOnPath (a read-only report honoring injected
 // Env), install actually executes git, so it resolves it with exec.LookPath
 // on the real process PATH — the same PATH the child inherits.
-func installGstack(agentmodDir string, stdout, stderr io.Writer, env Env) int {
+func installGstack(agentmodDir string, force bool, stdout, stderr io.Writer, env Env) int {
 	target := filepath.Join(agentmodDir, gstackRelProject)
+	exists := false
 	if _, err := os.Lstat(target); err == nil {
-		fmt.Fprintf(stderr, "agentmod: gstack is already installed at %s; remove that directory to reinstall\n", target)
-		return ExitError
+		if !force {
+			fmt.Fprintf(stderr, "agentmod: gstack is already installed at %s; re-run with --force to replace it\n", target)
+			return ExitError
+		}
+		exists = true
 	} else if !os.IsNotExist(err) {
 		fmt.Fprintf(stderr, "agentmod: %v\n", err)
 		return ExitError
@@ -103,7 +114,36 @@ func installGstack(agentmodDir string, stdout, stderr io.Writer, env Env) int {
 		fmt.Fprintf(stderr, "agentmod: git clone failed: %v\n%s", err, out)
 		return ExitError
 	}
-	if err := os.Rename(tmp, target); err != nil {
+	if exists {
+		fmt.Fprintf(stdout, "Replacing existing install at %s (--force)\n", target)
+		oldTmp, err := os.MkdirTemp(skillsDir, ".gstack-old-")
+		if err != nil {
+			fmt.Fprintf(stderr, "agentmod: %v\n", err)
+			return ExitError
+		}
+		// macOS rename(2) refuses an existing directory destination even
+		// when empty, so MkdirTemp only reserves a unique name; remove it
+		// before renaming the old install onto it.
+		if err := os.Remove(oldTmp); err != nil {
+			fmt.Fprintf(stderr, "agentmod: %v\n", err)
+			return ExitError
+		}
+		if err := os.Rename(target, oldTmp); err != nil {
+			fmt.Fprintf(stderr, "agentmod: %v\n", err)
+			return ExitError
+		}
+		if err := os.Rename(tmp, target); err != nil {
+			if rerr := os.Rename(oldTmp, target); rerr == nil {
+				fmt.Fprintf(stderr, "agentmod: %v (previous install restored)\n", err)
+			} else {
+				fmt.Fprintf(stderr, "agentmod: %v (previous install preserved at %s: %v)\n", err, oldTmp, rerr)
+			}
+			return ExitError
+		}
+		if err := os.RemoveAll(oldTmp); err != nil {
+			fmt.Fprintf(stderr, "agentmod: warning: previous install left at %s (%v)\n", oldTmp, err)
+		}
+	} else if err := os.Rename(tmp, target); err != nil {
 		fmt.Fprintf(stderr, "agentmod: %v\n", err)
 		return ExitError
 	}

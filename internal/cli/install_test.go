@@ -54,10 +54,10 @@ func makeGstackFixtureRepo(t *testing.T) string {
 	return dir
 }
 
-func runInstallForTest(t *testing.T, env Env) (code int, stdout, stderr string) {
+func runInstallForTest(t *testing.T, env Env, extra ...string) (code int, stdout, stderr string) {
 	t.Helper()
 	var out, errBuf strings.Builder
-	code = run([]string{"install", "gstack"}, &out, &errBuf, env)
+	code = run(append([]string{"install", "gstack"}, extra...), &out, &errBuf, env)
 	return code, out.String(), errBuf.String()
 }
 
@@ -125,6 +125,7 @@ func TestInstallGstackAlreadyInstalled(t *testing.T) {
 		t.Fatalf("exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, ExitError, stdout, stderr)
 	}
 	wantContains(t, "stderr", stderr, "already installed at "+target)
+	wantContains(t, "stderr", stderr, "--force")
 	if got, err := os.ReadFile(sentinel); err != nil || string(got) != "mine\n" {
 		t.Errorf("existing install was disturbed: %q, %v", got, err)
 	}
@@ -163,7 +164,8 @@ func TestInstallArgValidation(t *testing.T) {
 	}{
 		{"no component", []string{"install"}, "install requires a component"},
 		{"unknown component", []string{"install", "superpowers"}, `unknown install component "superpowers"`},
-		{"extra args", []string{"install", "gstack", "--force"}, "takes no further arguments"},
+		{"unknown flag", []string{"install", "gstack", "--frobnicate"}, `unsupported argument "--frobnicate"`},
+		{"extra arg after --force", []string{"install", "gstack", "--force", "extra"}, `unsupported argument "extra"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -178,5 +180,100 @@ func TestInstallArgValidation(t *testing.T) {
 				t.Errorf("skills dir created despite argument error (err %v)", err)
 			}
 		})
+	}
+}
+
+func TestInstallGstackForceReplacesExisting(t *testing.T) {
+	requireGit(t)
+	fixture := makeGstackFixtureRepo(t)
+	root := makeProject(t, config.Default())
+	target := filepath.Join(root, ".agentmod", gstackRelProject)
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(target, "keep.txt")
+	if err := os.WriteFile(sentinel, []byte("old install\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runInstallForTest(t, fakeEnv(root, map[string]string{
+		gstackSourceEnvVar: fixture,
+	}), "--force")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, ExitOK, stdout, stderr)
+	}
+	wantContains(t, "stdout", stdout, "Replacing existing install at "+target)
+	wantContains(t, "stdout", stdout, "Installed gstack to "+target)
+	if _, err := os.Lstat(sentinel); !os.IsNotExist(err) {
+		t.Errorf("old install's keep.txt survived --force (err %v)", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(target, "SKILL.md")); err != nil {
+		t.Errorf("cloned SKILL.md missing: %v", err)
+	} else if string(got) != "# gstack fixture\n" {
+		t.Errorf("cloned SKILL.md = %q", got)
+	}
+	// The old copy and the clone temp dir are both gone.
+	entries, err := os.ReadDir(filepath.Dir(target))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "gstack" {
+			t.Errorf("unexpected entry %q left in skills dir after --force", e.Name())
+		}
+	}
+}
+
+func TestInstallGstackForceWithoutExisting(t *testing.T) {
+	requireGit(t)
+	fixture := makeGstackFixtureRepo(t)
+	root := makeProject(t, config.Default())
+	target := filepath.Join(root, ".agentmod", gstackRelProject)
+
+	code, stdout, stderr := runInstallForTest(t, fakeEnv(root, map[string]string{
+		gstackSourceEnvVar: fixture,
+	}), "--force")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, ExitOK, stdout, stderr)
+	}
+	if strings.Contains(stdout, "Replacing existing install") {
+		t.Errorf("--force with nothing installed claimed to replace something:\n%s", stdout)
+	}
+	wantContains(t, "stdout", stdout, "Installed gstack to "+target)
+	if _, err := os.Stat(filepath.Join(target, "SKILL.md")); err != nil {
+		t.Errorf("cloned SKILL.md missing: %v", err)
+	}
+}
+
+func TestInstallGstackForceCloneFailureKeepsOld(t *testing.T) {
+	requireGit(t)
+	root := makeProject(t, config.Default())
+	target := filepath.Join(root, ".agentmod", gstackRelProject)
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(target, "keep.txt")
+	if err := os.WriteFile(sentinel, []byte("old install\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runInstallForTest(t, fakeEnv(root, map[string]string{
+		gstackSourceEnvVar: filepath.Join(t.TempDir(), "no-such-repo"),
+	}), "--force")
+	if code != ExitError {
+		t.Fatalf("exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, ExitError, stdout, stderr)
+	}
+	wantContains(t, "stderr", stderr, "git clone failed")
+	if got, err := os.ReadFile(sentinel); err != nil || string(got) != "old install\n" {
+		t.Errorf("existing install was disturbed by failed --force: %q, %v", got, err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(target))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "gstack" {
+			t.Errorf("unexpected entry %q left in skills dir after failed --force", e.Name())
+		}
 	}
 }

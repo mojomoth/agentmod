@@ -594,3 +594,30 @@ routed, so neither leak exists). Broken config = defaults (enabled, partial).
   any hardening. gstack's own setup script is never run (§16) — clone only.
 - **No flags yet**: `--force` rejected ("takes no further arguments") until
   its slice lands; argument validation happens before any FS work (tested).
+  (Superseded by D031 — --force now accepted.)
+
+## D031 — 2026-06-11 — install gstack --force: clone first, then swap
+(extends D030; Phase 4 item 2)
+- **Flag parsing**: everything after `gstack` is matched against a switch;
+  only `--force` is accepted (idempotent if repeated), anything else →
+  `unsupported argument %q (only --force is supported)`, exit 1, before any
+  FS work. No flag package — one flag doesn't justify it.
+- **Replace order (IMPLEMENTATION_PLAN §10 "replaces only the project-local
+  copy")**: the clone into the sibling temp dir happens FIRST, exactly as in
+  the plain path; only after it succeeds is the existing install moved
+  aside (rename to a `.gstack-old-*` sibling), the clone renamed in, and the
+  old copy RemoveAll'd. A failed clone therefore returns before the existing
+  install is touched (tested byte-intact).
+- **macOS rename gotcha**: Darwin's rename(2) refuses an existing directory
+  destination even when empty (cost one red run), so os.MkdirTemp only
+  RESERVES the unique `.gstack-old-*` name — it is os.Remove'd immediately
+  before renaming the old install onto it. The tiny window between Remove
+  and Rename is acceptable for a CLI (no concurrent agentmod expected in
+  one skills dir).
+- **Failure honesty**: if the final rename-in fails after the old install
+  was moved aside, agentmod tries to rename it back ("previous install
+  restored"); if even that fails the old copy is NOT deleted and its
+  `.gstack-old-*` path is printed. RemoveAll failure of the old copy after
+  a successful swap is a warning, not an error — the new install is live.
+- **Non-force abort message** now names the remedy: "re-run with --force to
+  replace it" (was "remove that directory to reinstall").

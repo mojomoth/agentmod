@@ -41,6 +41,7 @@ Commands:
              permissionDecision instead); allowed commands exit 0 silently
   install    install a managed component into this project only
              (install gstack clones into .agentmod/claude/skills/gstack;
+              --force replaces an existing project-local install;
               the global ~/.claude/skills is never touched)
   version    print version and exit
   help       show this help

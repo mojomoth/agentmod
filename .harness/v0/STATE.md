@@ -1,14 +1,14 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 4 slice 1 — install gstack
-happy-path clone)
+Last updated: 2026-06-11 (iteration: Phase 4 slice 2 — install gstack
+--force)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
   both shell hooks + rc editor + env-hygiene integration tests + the
   first-session diagnosis). Phase 3 COMPLETE (six doctor slices + guard
   claude-bash + guard wiring T17 + auth copy-on-consent T15). Phase 4
-  STARTED: install gstack clone landed; remaining: --force, pollution
+  IN PROGRESS: install gstack clone + --force landed; remaining: pollution
   verification, error-reporting tests.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
@@ -428,6 +428,29 @@ happy-path clone)
     installed" ok line → second run aborts exit 1. (Doctor's global-gstack
     warn fired on the dev machine's own pre-existing install — D010,
     expected, not a violation.)
+- install gstack `--force` LANDED and green (Phase 4 slice 2 ✅, D031):
+  runInstall arg loop now accepts `--force` (anything else → "unsupported
+  argument %q (only --force is supported)" before any FS work);
+  installGstack(agentmodDir, force, …). Read D030+D031 before touching
+  installer code.
+  - Replace order: clone to the sibling temp dir FIRST (unchanged code
+    path), then swap — old install renamed to a `.gstack-old-*` sibling,
+    clone renamed in, old RemoveAll'd. Failed clone returns before the
+    existing install is touched. Rename-in failure restores the old copy
+    (or preserves it and prints its path). Non-force abort message now says
+    "re-run with --force to replace it".
+  - macOS gotcha (cost one red run): Darwin rename(2) refuses an existing
+    dir destination even when EMPTY — MkdirTemp only reserves the
+    `.gstack-old-*` name; os.Remove it before renaming onto it.
+  - Tests: TestInstallArgValidation grew to ×4 (`--frobnicate` and
+    `--force extra` both rejected, nothing created); 3 new funcs —
+    ForceReplacesExisting (sentinel gone, fixture SKILL.md in, skills dir
+    contains only "gstack"), ForceWithoutExisting (plain install, no
+    "Replacing" line), ForceCloneFailureKeepsOld (old install byte-intact,
+    no leftovers). AlreadyInstalled now also asserts the --force hint.
+    Usage text in cli.go mentions --force.
+  - Binary smoke in /tmp passed: install v1 → no-force abort exit 1 →
+    --force → SKILL.md is v2, old marker gone, no stray entries.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -462,22 +485,30 @@ other two homes and the skills list unchanged; no agentmod artifacts.)
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 4, second item: "outside-project failure; already-installed abort;
---force (+ tests)". The first two halves ALREADY LANDED with slice 1 (see
-D030 — they were inherent to a safe happy path), so this item now means:
-- Add `--force` to runInstall's arg parsing (currently any extra arg is
-  rejected — TestInstallArgValidation's "extra args" case uses `--force`
-  as its fixture and MUST be updated to expect acceptance).
-- --force semantics per IMPLEMENTATION_PLAN §10: replaces ONLY the
-  project-local copy. Safe order: clone to temp FIRST, then swap (rename
-  old aside / RemoveAll after successful rename) so a failed clone never
-  destroys the existing install — decide and record in D030 or a new D.
-- Tests: --force over existing install (sentinel file gone, new content
-  present), --force when nothing installed (plain install), failed --force
-  clone leaves the old install intact, `install gstack --force extra` still
-  rejected. Reuse makeGstackFixtureRepo/runGitFixture.
-- Item 3 (global before/after pollution verification + abort) and item 4
-  (distinct no-git/network/setup error reporting) stay separate iterations.
+Phase 4, third item: "global before/after pollution verification + abort
+path (+ tests)" per IMPLEMENTATION_PLAN §10: record the global
+`~/.claude/skills` listing (via injected Env HOME, like doctor's
+gstackRelGlobal) before the clone and after the swap; any delta → report
+VIOLATION naming the new entries and instruct cleanup, nonzero exit.
+Defense in depth — the clone targets a project-local temp dir and cannot
+write there, but verify anyway. Notes:
+- Read the listing through env.LookupEnv("HOME") only; HOME unset → skip
+  the verification with a printed note (cannot compare), do NOT fail.
+- The dev machine's own global gstack (D010) must NOT trip it — only a
+  before/after DELTA counts, never mere existence (doctor already warns on
+  existence).
+- Tests with a fake HOME: unchanged listing → silent ok; a test hook is
+  needed to simulate a delta (e.g. plant a file in the fake global skills
+  dir between snapshot points is impossible from outside — consider
+  comparing against a listing taken before MkdirAll and after rename, and
+  simulate by pre-creating the delta via AGENTMOD_GSTACK_SOURCE pointing at
+  a repo whose clone legitimately succeeds while the test itself mutates
+  fake-global between... simplest honest test: factor the compare into a
+  pure func compareGstackListings(before, after) and unit-test it, plus one
+  integration test that the happy path prints the "global skills unchanged"
+  line). Decide shape next iteration; record in a new D.
+- Item 4 (distinct no-git/network/setup error reporting) stays a separate
+  iteration.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

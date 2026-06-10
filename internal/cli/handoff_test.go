@@ -40,6 +40,10 @@ func TestHandoffCreateDefaultOutput(t *testing.T) {
 	wantContains(t, "stdout", stdout,
 		"Created handoff snapshot: "+wantPath,
 		"payload:",
+		// The default output lives in snapshots/, which Create makes before
+		// the walk, so the structural exclusion is always reported here.
+		"excluded by default policy: 1 entry",
+		".agentmod/snapshots/ (snapshots-output)",
 	)
 
 	zr, err := zip.OpenReader(wantPath)
@@ -87,6 +91,54 @@ func TestHandoffCreateExplicitOutput(t *testing.T) {
 		t.Fatalf("explicit output missing: %v", err)
 	}
 	wantContains(t, "stdout", stdout, "Created handoff snapshot: "+output)
+}
+
+func TestHandoffCreateReportsPolicyExclusions(t *testing.T) {
+	// An auth file in the routed home must be dropped by the default
+	// exclusion engine AND named on stdout with its rule, so the user sees
+	// what the snapshot does not carry (T20; REDACTION.md renders the same
+	// list in a later slice).
+	root := makeProject(t, config.Default())
+	claudeDir := filepath.Join(root, ".agentmod", "claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		".credentials.json": `{"token":"sk-FAKE-fixture"}`,
+		"settings.json":     "{}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(claudeDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	output := filepath.Join(t.TempDir(), "snap.amod")
+	code, stdout, stderr := runHandoffForTest(t, fakeEnv(root, nil), "create", "--output", output)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	wantContains(t, "stdout", stdout,
+		"excluded by default policy: 1 entry",
+		".agentmod/claude/.credentials.json (auth-file)",
+	)
+
+	zr, err := zip.OpenReader(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+	keptSettings := false
+	for _, f := range zr.File {
+		if strings.Contains(f.Name, ".credentials.json") {
+			t.Errorf("auth file leaked into snapshot: %q", f.Name)
+		}
+		if f.Name == "payload/.agentmod/claude/settings.json" {
+			keptSettings = true
+		}
+	}
+	if !keptSettings {
+		t.Errorf("settings.json missing from snapshot payload")
+	}
 }
 
 func TestHandoffCreateSecondRunSameClockRefused(t *testing.T) {

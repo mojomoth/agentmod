@@ -1,7 +1,7 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 5 slice 1 — .amod writer +
-`agentmod handoff create`, D034)
+Last updated: 2026-06-11 (iteration: Phase 5 slice 2 — default exclusion
+engine, D035)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
@@ -9,8 +9,9 @@ Last updated: 2026-06-11 (iteration: Phase 5 slice 1 — .amod writer +
   first-session diagnosis). Phase 3 COMPLETE (six doctor slices + guard
   claude-bash + guard wiring T17 + auth copy-on-consent T15). Phase 4
   COMPLETE (install gstack clone + --force + pollution verification +
-  distinct error reporting; T18 ✅). Phase 5 STARTED: slice 1 (.amod
-  writer, T19 🟡) landed; next is the exclusion engine (T20).
+  distinct error reporting; T18 ✅). Phase 5 IN PROGRESS: slice 1 (.amod
+  writer, T19 🟡) + slice 2 (default exclusion engine, T20 ✅) landed;
+  next is the redaction report + secret-candidate scan (T21).
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -535,6 +536,37 @@ Last updated: 2026-06-11 (iteration: Phase 5 slice 1 — .amod writer +
     table ×8 creating nothing, nil-Now). Binary smoke in /tmp passed:
     init → create → unzip -l layout → shasum -c OK → refuse-overwrite
     exit 1, no partial files.
+- default exclusion engine LANDED and green (Phase 5 slice 2 ✅, D035,
+  T20 ✅): new `internal/handoff/exclude.go` (`Rule{ID, Reason, Matches}`,
+  `ExcludedEntry`, `DefaultRules()`, `snapshotsExclusion`) wired into the
+  writeSnapshot walk; `CreateOptions.Rules` (nil = defaults; empty non-nil
+  = policy off, pinned escape hatch) + `Result.Excluded` (path + rule +
+  reason, walk order, pruned dirs once with trailing "/"). Read D035
+  before touching exclusion/redaction code.
+  - Rules: auth by NAME at any depth (.credentials.json, auth.json,
+    credentials.json, credentials — D028 provenance-independent), *.env +
+    .env.*, ssh keys (id_* families + .pub + *.pem), credential dirs
+    (.ssh/.aws/.azure/.gcloud/.kube/.gnupg/.docker), *.keychain(-db),
+    .git (dir OR worktree file), node_modules dirs, tmp/.tmp dirs,
+    .cache dirs + path-anchored routing cache targets (new layout consts
+    NodeNPMCacheDir/NodePnpmDir/NodeBunDir; routing.Vars refactored onto
+    them, no behavior change). Sessions/logs deliberately stay IN; no
+    fuzzy token matching (T21's content scan owns that); no source-code
+    rule yet (payload is .agentmod-only — structurally absent).
+  - Rule check precedes the member-kind switch: an excluded fifo is
+    dropped, not the irregular-file error. Structural snapshots/ skip is
+    recorded as `snapshots-output` when the dir exists.
+  - CLI prints each excluded path + rule ID under "excluded by default
+    policy:" (count line is singular/plural-correct; "nothing" when 0).
+  - Tests: 5 funcs in new exclude_test.go (38-case rule table,
+    hostile-fixture end-to-end w/ exact Excluded map, prune-once +
+    payload count, empty-Rules escape hatch, determinism) + cli
+    TestHandoffCreateReportsPolicyExclusions; default-output test grew
+    the structural-line assertions. Binary smoke in /tmp passed (auth/
+    .env/npm-cache excluded + named on stdout, zip clean, exit 0).
+  - Docs-slice note (D035): gstack clone loses .git (reinstall via
+    --force); node/bin npm symlinks dangle (lib/node_modules excluded) —
+    HANDOFF.md/RESTORE.md must mention both.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -569,28 +601,28 @@ other two homes and the skills list unchanged; no agentmod artifacts.)
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 5, second item: "default exclusion engine (source, .git,
-node_modules, caches, auth, .env…) (+ tests)" — T20. Re-read FABLE_PLAN
-§18 "Excluded by default" + IMPLEMENTATION_PLAN §12 before coding. Notes:
-- D028's standing list: consent-copied auth files
-  (`claude/.credentials.json`, `codex/auth.json`, rel to .agentmod/) MUST
-  be excluded by default. Claude also writes `.credentials.json` itself on
-  login — exclude the NAME, not just the consent-copy provenance.
-- §18 default exclusions: full source code (payload is .agentmod-only
-  already — source only enters via future project-level payload roots),
-  .git, node_modules, build artifacts, caches, tmp, auth, credentials,
-  tokens, .env*, ssh/cloud creds, OS credential store. Sessions stay IN
-  for normal handoffs (excluded only --for-git, Phase 7).
-- Caches inside .agentmod/ concretely: node/npm-cache, node/pnpm,
-  node/bun (routing.Vars targets), plus logs/ stays in for normal
-  handoffs per IMPLEMENTATION_PLAN §12 ("logs only for --for-git").
-- Shape: an exclusion-rule list living in internal/handoff (the future
-  redaction report must explain WHY each exclusion happened — design the
-  rule type with a human-readable reason now so the REDACTION.md slice
-  just renders it). Wire into the writeSnapshot walk; excluded entries
-  should be RECORDED (path + rule) in the Result for that report.
-- The hard-hit refusal (`--allow-findings`, private keys) belongs to the
-  redaction/secret-scan slice, not this one.
+Phase 5, third item: "redaction report + secret-candidate scan (+ tests)"
+— T21. Re-read IMPLEMENTATION_PLAN §12 create pipeline + FABLE_PLAN §18
+before coding. Notes:
+- §12 pipeline position: scan the files that SURVIVED the exclusion
+  engine (collect → filter → scan → write). Warn-level hits are listed in
+  REDACTION.md; HARD hits (e.g. private-key material: "BEGIN … PRIVATE
+  KEY") REFUSE creation unless `--allow-findings` is passed (new flag on
+  handoff create).
+- REDACTION.md (zip member name per D034 layout) renders BOTH halves:
+  every Result.Excluded entry with its Reason (the engine was designed
+  for this — just render), and the secret-scan findings on kept files.
+  T19 stays 🟡 until HANDOFF/RESTORE docs land (separate item).
+- Scan shape: content-based candidate patterns (api[_-]?key, token,
+  secret, BEGIN PRIVATE KEY, AWS AKIA…, etc.) over kept payload files
+  during the walk or a second pass; stdlib only (D004). Record
+  path + matched-pattern (NOT the secret value itself) for the report.
+- Fixtures must use obviously-fake values (sk-FAKE-fixture, CHECKS.md §5)
+  and the hostile fixture in exclude_test.go (mkHostileFixture) is
+  reusable — its sk-FAKE auth values are EXCLUDED files, so a clean-scan
+  assertion over kept files should pass on it as-is.
+- Determinism: findings/report must be byte-stable (walk order is lexical;
+  keep it).
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

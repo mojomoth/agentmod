@@ -57,7 +57,10 @@ Add/split items freely; keep units small.
       (D034: internal/handoff package + `handoff create [--output]`;
        snapshots/ structurally excluded; REDACTION/HANDOFF/RESTORE members
        and all policy exclusions are the items below)
-- [ ] default exclusion engine (source, .git, node_modules, caches, auth, .env…) (+ tests)
+- [x] default exclusion engine (source, .git, node_modules, caches, auth, .env…) (+ tests)
+      (D035: Rule list in internal/handoff/exclude.go with per-rule
+       human-readable reasons; Result.Excluded feeds the REDACTION.md slice;
+       source code structurally absent until project-level payload roots)
 - [ ] redaction report + secret-candidate scan (+ tests)
 - [ ] HANDOFF + RESTORE human docs generation (+ tests)
 - [ ] git state metadata w/ sanitized remote URL, dirty warning (+ tests)

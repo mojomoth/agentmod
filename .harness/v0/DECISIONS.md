@@ -752,3 +752,57 @@ every choice here.
   verify/list answer "not implemented yet" (exit 1) so they read as
   planned, not mistyped; unknown subcommand/flags rejected before any FS
   work (tested). Outside a project → exit 2 naming 'agentmod init'.
+
+## D035 — 2026-06-11 — T20: default exclusion engine shape
+
+`internal/handoff/exclude.go`: `Rule{ID, Reason, Matches(relPath, base,
+isDir)}` + `DefaultRules()`. Read this before touching exclusion/redaction
+code; the REDACTION.md slice renders what this records.
+
+- **Matcher contract**: relPath is the project-root-relative forward-slash
+  path (".agentmod/claude/.credentials.json"); first matching rule wins, so
+  security-relevant rules sit first in the list and an entry matched by
+  several rules is reported under the most security-relevant one. A matched
+  directory is pruned (SkipDir) and recorded ONCE with a trailing "/" —
+  never per descendant. The rule check runs BEFORE the member-kind switch,
+  so an excluded fifo is silently dropped instead of being the irregular-
+  file hard error.
+- **Recording**: `Result.Excluded []ExcludedEntry{Path, RuleID, Reason}` in
+  walk (lexical, deterministic) order. The structural snapshots/ skip
+  (D034) is recorded too, as `snapshots-output` — recorded only when the
+  dir actually exists, so explicit `--output` against a snapshot-less tree
+  reports nothing. Reasons are human-readable sentences; REDACTION.md
+  renders them verbatim.
+- **Rules opt-out**: `CreateOptions.Rules` nil → DefaultRules(); non-nil
+  used as-is; an explicitly EMPTY slice disables all policy exclusions
+  (structural skip remains) — the documented escape hatch, pinned by test.
+  Phase 7 --for-git APPENDS rules (sessions/logs) instead of forking the
+  walk.
+- **Auth matched by NAME at any depth** (per D028's "exclude the NAME, not
+  the provenance"): `.credentials.json`, `auth.json`, `credentials.json`,
+  bare `credentials`. Exact names only — `auth.json.bak` stays (the secret
+  scan slice owns fuzzy/content detection).
+- **Other rules**: env-file = `*.env` + `.env.*` (NOT `.envrc` — content
+  scan's job); ssh-key = id_rsa/dsa/ecdsa/ed25519(+_sk) families with
+  optional .pub + `*.pem`; credential-dir = .ssh/.aws/.azure/.gcloud/.kube/
+  .gnupg/.docker dirs; os-credential-store = `*.keychain`/`*.keychain-db`;
+  vcs-git = `.git` as dir OR regular file (worktrees); node-modules dirs;
+  tmp = `tmp`/`.tmp` dirs; cache = any `.cache` dir + the three routing
+  cache targets PATH-ANCHORED (`.agentmod/node/{npm-cache,pnpm,bun}` via
+  new layout consts NodeNPMCacheDir/NodePnpmDir/NodeBunDir, which
+  routing.Vars now also uses) — a dir merely NAMED npm-cache elsewhere is
+  user content and stays.
+- **Deliberately NOT excluded**: sessions + logs (normal handoffs keep
+  them; --for-git excludes them in Phase 7), fuzzy "token" name matching
+  (tokenizer.json false positive — T21's content scan covers real tokens).
+  No source-code rule yet: the payload is .agentmod-only, so source is
+  structurally absent; the rule gets added when project-level payload
+  roots (payload/.claude etc.) land.
+- **Known consequences for the docs slices**: the gstack clone loses its
+  .git (reinstall via `agentmod install gstack --force`); npm-prefix bin
+  symlinks under node/bin dangle in the snapshot because lib/node_modules
+  is excluded (restore docs must say "reinstall global npm tools").
+  HANDOFF.md/RESTORE.md must mention both.
+- **CLI**: `handoff create` prints each excluded path with its rule ID
+  (singular/plural-correct count line; "nothing" when zero) — interim
+  visibility until REDACTION.md exists.

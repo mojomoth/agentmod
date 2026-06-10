@@ -66,12 +66,12 @@ func Vars(agentmodDir string, cfg config.Config) []Var {
 	if cfg.Node.Enabled {
 		node := filepath.Join(agentmodDir, layout.NodeDir)
 		vars = append(vars,
-			Var{"NPM_CONFIG_CACHE", filepath.Join(node, "npm-cache")},
+			Var{"NPM_CONFIG_CACHE", filepath.Join(node, layout.NodeNPMCacheDir)},
 			// Prefix is node/ itself so npm's global bin is node/bin —
 			// the one PATH entry the hook manages.
 			Var{"NPM_CONFIG_PREFIX", node},
-			Var{"PNPM_HOME", filepath.Join(node, "pnpm")},
-			Var{"BUN_INSTALL", filepath.Join(node, "bun")},
+			Var{"PNPM_HOME", filepath.Join(node, layout.NodePnpmDir)},
+			Var{"BUN_INSTALL", filepath.Join(node, layout.NodeBunDir)},
 		)
 	}
 	return vars

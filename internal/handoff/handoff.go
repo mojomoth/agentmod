@@ -68,6 +68,11 @@ type CreateOptions struct {
 	CreatedAt   time.Time // manifest timestamp + zip member mtimes
 	Version     string    // agentmod version for the manifest
 	Platform    string    // "<GOOS>/<GOARCH>" for the manifest
+	// Rules is the exclusion policy: nil means DefaultRules(). A non-nil
+	// slice is used as-is — an explicitly empty one disables every policy
+	// exclusion (the structural snapshots/ skip still applies), so the
+	// caller owns the secret-safety consequences.
+	Rules []Rule
 }
 
 // Result reports what Create wrote.
@@ -75,16 +80,21 @@ type Result struct {
 	OutputPath   string
 	PayloadFiles int   // non-directory payload members
 	PayloadBytes int64 // total content bytes of those members
+	// Excluded lists every entry the exclusion engine dropped (plus the
+	// structural snapshots/ skip), in walk (lexical) order. A pruned
+	// directory is recorded once, not per descendant. The redaction report
+	// renders this list.
+	Excluded []ExcludedEntry
 }
 
 // Create packs the project's .agentmod/ directory into a .amod snapshot.
 //
-// Scope (this slice): the payload is everything under .agentmod/ except
-// .agentmod/snapshots — that exclusion is structural, not policy: snapshots
-// is the default OUTPUT directory, so packing it would nest prior snapshots
-// (and, mid-write, the partially-written one) inside the new one. The
-// policy exclusion engine (auth files, caches, .env, …) is a separate
-// slice that filters further.
+// The payload is everything under .agentmod/ except .agentmod/snapshots
+// (structural: it is the default OUTPUT directory, so packing it would nest
+// prior snapshots — and, mid-write, the partially-written one — inside the
+// new one) and whatever opts.Rules exclude (DefaultRules when nil: auth
+// files, .env, ssh/cloud credentials, .git, node_modules, caches, tmp).
+// Everything dropped is recorded in Result.Excluded.
 //
 // The output file never exists in a partial state: Create writes a dot-
 // prefixed temp file in the output directory and renames it over
@@ -145,6 +155,11 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 	res := &Result{}
 	var entries []InventoryEntry
 
+	rules := opts.Rules
+	if rules == nil {
+		rules = DefaultRules()
+	}
+
 	skipAbs := map[string]bool{}
 	for _, p := range []string{tmpName, opts.OutputPath} {
 		if abs, err := filepath.Abs(p); err == nil {
@@ -158,6 +173,7 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 			return err
 		}
 		if path == snapshotsDir && d.IsDir() {
+			res.Excluded = append(res.Excluded, snapshotsExclusion)
 			return filepath.SkipDir
 		}
 		if abs, aerr := filepath.Abs(path); aerr == nil && skipAbs[abs] {
@@ -170,6 +186,29 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 		name := PayloadPrefix + project.DirName
 		if rel != "." {
 			name += "/" + filepath.ToSlash(rel)
+
+			// Policy exclusions: the rule check precedes the member-kind
+			// switch, so even an irregular file with a matching name is
+			// silently dropped rather than a create-time error.
+			relProj := strings.TrimPrefix(name, PayloadPrefix)
+			for _, r := range rules {
+				if !r.Matches(relProj, d.Name(), d.IsDir()) {
+					continue
+				}
+				excludedPath := relProj
+				if d.IsDir() {
+					excludedPath += "/"
+				}
+				res.Excluded = append(res.Excluded, ExcludedEntry{
+					Path:   excludedPath,
+					RuleID: r.ID,
+					Reason: r.Reason,
+				})
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
 		}
 
 		info, err := d.Info()

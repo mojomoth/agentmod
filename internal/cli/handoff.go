@@ -93,6 +93,17 @@ func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 	}
 	fmt.Fprintf(stdout, "Created handoff snapshot: %s\n", res.OutputPath)
 	fmt.Fprintf(stdout, "  payload: %d files, %d bytes (manifest, inventory, and checksums included)\n", res.PayloadFiles, res.PayloadBytes)
+	switch n := len(res.Excluded); n {
+	case 0:
+		fmt.Fprintf(stdout, "  excluded by default policy: nothing\n")
+	case 1:
+		fmt.Fprintf(stdout, "  excluded by default policy: 1 entry\n")
+	default:
+		fmt.Fprintf(stdout, "  excluded by default policy: %d entries\n", n)
+	}
+	for _, e := range res.Excluded {
+		fmt.Fprintf(stdout, "    %s (%s)\n", e.Path, e.RuleID)
+	}
 	fmt.Fprintf(stdout, "Verify or restore it on the target machine with 'agentmod handoff' (restore lands in a later release).\n")
 	return ExitOK
 }

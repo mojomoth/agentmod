@@ -18,6 +18,15 @@ const (
 	LogsDir            = "logs"
 )
 
+// Cache directories under node/, created on demand by the package managers
+// that routing points at them. Named here so the handoff exclusion engine
+// and routing agree on the paths.
+const (
+	NodeNPMCacheDir = "npm-cache" // NPM_CONFIG_CACHE
+	NodePnpmDir     = "pnpm"      // PNPM_HOME
+	NodeBunDir      = "bun"       // BUN_INSTALL
+)
+
 // Subdirs lists the directories init creates under .agentmod/, relative to
 // it. opencode/xdg is absent: it belongs to the opt-in XDG full-isolation
 // mode and is created only when that mode is enabled.

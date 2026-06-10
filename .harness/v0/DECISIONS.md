@@ -621,3 +621,36 @@ routed, so neither leak exists). Broken config = defaults (enabled, partial).
   a successful swap is a warning, not an error — the new install is live.
 - **Non-force abort message** now names the remedy: "re-run with --force to
   replace it" (was "remove that directory to reinstall").
+
+## D032 — 2026-06-11 — install gstack: global pollution verification shape
+(Phase 4 item 3; IMPLEMENTATION_PLAN §10 "record listing before/after")
+- **Snapshot points**: `snapshotGlobalSkills(env)` is the FIRST thing
+  installGstack does (before the exists check, before MkdirAll — maximal
+  coverage); the comparison (`verifyGlobalSkillsUnchanged`) runs after the
+  rename/swap, after the "Installed gstack to" line, before the success
+  paragraph. Early-return failure paths (abort, no git, failed clone) do
+  not verify — nothing global-adjacent ran.
+- **Delta, never existence**: an absent skills dir is a valid EMPTY listing
+  (names nil); only a before/after difference violates. The dev machine's
+  own pre-existing global gstack (D010) therefore never trips it — doctor
+  owns the existence warning.
+- **Unverifiable ≠ failure**: HOME unset → "skipped (HOME not set …)" note;
+  ReadDir error before or after (e.g. skills is a regular file → ENOTDIR)
+  → "skipped (cannot read …)" note. Both stdout, exit 0 — defense in depth
+  must not fail installs on machines without a global Claude home. All
+  reads go through the injected Env's HOME only (D025 pattern).
+- **Violation report**: stderr block — "VIOLATION: <dir> changed during
+  install", "new entries: …" (instruct manual removal) and/or "entries
+  that disappeared: …", then an honesty line: the project-local install
+  itself succeeded (it is left in place — deleting it fixes nothing) but
+  this is a bug to report. Exit 1; the "was not touched" success paragraph
+  is suppressed.
+- **Test shape** (the question STATE.md deferred): pure `diffListings`
+  (sorted merge-walk) unit table; integration happy path asserting the
+  "unchanged" line with PRE-EXISTING global entries (D010 negative); the
+  violation path is tested END-TO-END with no production test hook by
+  symlinking the fake HOME's `.claude/skills` AT the project-local skills
+  dir — the legitimate local install then appears as a new "global" entry;
+  ENOTDIR skip integration; direct `verifyGlobalSkillsUnchanged` call for
+  the removed-entry branch. fakeEnv has no HOME, so every pre-existing
+  install test also asserts/tolerates the skip line.

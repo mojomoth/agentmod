@@ -47,7 +47,7 @@ Add/split items freely; keep units small.
 - [x] outside-project failure; already-installed abort; --force (+ tests)
       (outside-project exit-2 + already-installed abort landed with the clone
        task; --force clone-first-then-swap landed in its own slice, D031)
-- [ ] global before/after pollution verification + abort path (+ tests)
+- [x] global before/after pollution verification + abort path (+ tests)
 - [ ] error reporting: no git, network failure, setup failure (+ tests)
 
 ## Phase 5 — handoff create

@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/agentmod/agentmod/internal/project"
 )
@@ -69,6 +71,12 @@ func runInstall(args []string, stdout, stderr io.Writer, env Env) int {
 // Env), install actually executes git, so it resolves it with exec.LookPath
 // on the real process PATH — the same PATH the child inherits.
 func installGstack(agentmodDir string, force bool, stdout, stderr io.Writer, env Env) int {
+	// IMPLEMENTATION_PLAN §10 defense in depth: snapshot the global Claude
+	// skills listing before doing anything, re-read it after the install,
+	// and treat any delta as a violation. The clone targets a project-local
+	// temp dir and cannot write there, but verify anyway.
+	globalBefore := snapshotGlobalSkills(env)
+
 	target := filepath.Join(agentmodDir, gstackRelProject)
 	exists := false
 	if _, err := os.Lstat(target); err == nil {
@@ -149,6 +157,101 @@ func installGstack(agentmodDir string, force bool, stdout, stderr io.Writer, env
 	}
 
 	fmt.Fprintf(stdout, "Installed gstack to %s\n", target)
+	if !verifyGlobalSkillsUnchanged(globalBefore, target, stdout, stderr, env) {
+		return ExitError
+	}
 	fmt.Fprintf(stdout, "\ngstack is project-local: only this project's Claude (routed via the\nshell hook) sees it. The global ~/.claude/skills was not touched.\nRun 'agentmod doctor' to confirm.\n")
 	return ExitOK
+}
+
+// globalSkillsSnapshot captures the entry listing of the global Claude
+// skills directory ($HOME + dir(gstackRelGlobal)) for the §10 before/after
+// pollution verification.
+type globalSkillsSnapshot struct {
+	dir     string   // "" when HOME is unset (cannot locate the directory)
+	names   []string // sorted entry names; nil when the directory is absent
+	readErr error    // directory present (or stat-ambiguous) but unreadable
+}
+
+// snapshotGlobalSkills reads the global skills listing through the injected
+// Env only (D025 pattern). An absent directory is a valid empty listing —
+// the violation test is a before/after DELTA, never mere existence (doctor
+// already warns on existence, D010).
+func snapshotGlobalSkills(env Env) globalSkillsSnapshot {
+	home, ok := env.LookupEnv("HOME")
+	if !ok || home == "" {
+		return globalSkillsSnapshot{}
+	}
+	dir := filepath.Join(home, filepath.Dir(gstackRelGlobal))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return globalSkillsSnapshot{dir: dir}
+		}
+		return globalSkillsSnapshot{dir: dir, readErr: err}
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	return globalSkillsSnapshot{dir: dir, names: names}
+}
+
+// diffListings compares two sorted name listings and returns the names only
+// in after (added) and only in before (removed).
+func diffListings(before, after []string) (added, removed []string) {
+	i, j := 0, 0
+	for i < len(before) && j < len(after) {
+		switch {
+		case before[i] == after[j]:
+			i++
+			j++
+		case before[i] < after[j]:
+			removed = append(removed, before[i])
+			i++
+		default:
+			added = append(added, after[j])
+			j++
+		}
+	}
+	removed = append(removed, before[i:]...)
+	added = append(added, after[j:]...)
+	return added, removed
+}
+
+// verifyGlobalSkillsUnchanged re-snapshots the global skills directory and
+// compares it against the pre-install snapshot. A delta prints a VIOLATION
+// report on stderr and returns false (the caller exits nonzero); an
+// unverifiable state (HOME unset, unreadable directory) prints a skip note
+// and returns true — the check is defense in depth, not a gate that may
+// fail installs on machines without a global Claude home.
+func verifyGlobalSkillsUnchanged(before globalSkillsSnapshot, target string, stdout, stderr io.Writer, env Env) bool {
+	if before.dir == "" {
+		fmt.Fprintf(stdout, "Global skills check: skipped (HOME not set; cannot locate the global Claude skills directory)\n")
+		return true
+	}
+	if before.readErr != nil {
+		fmt.Fprintf(stdout, "Global skills check: skipped (cannot read %s: %v)\n", before.dir, before.readErr)
+		return true
+	}
+	after := snapshotGlobalSkills(env)
+	if after.readErr != nil {
+		fmt.Fprintf(stdout, "Global skills check: skipped (cannot read %s: %v)\n", after.dir, after.readErr)
+		return true
+	}
+	added, removed := diffListings(before.names, after.names)
+	if len(added) == 0 && len(removed) == 0 {
+		fmt.Fprintf(stdout, "Global skills check: %s unchanged\n", before.dir)
+		return true
+	}
+	fmt.Fprintf(stderr, "agentmod: VIOLATION: %s changed during install\n", before.dir)
+	if len(added) > 0 {
+		fmt.Fprintf(stderr, "agentmod:   new entries: %s — inspect and remove them by hand\n", strings.Join(added, ", "))
+	}
+	if len(removed) > 0 {
+		fmt.Fprintf(stderr, "agentmod:   entries that disappeared: %s\n", strings.Join(removed, ", "))
+	}
+	fmt.Fprintf(stderr, "agentmod: the project-local install at %s itself succeeded, but agentmod must\nagentmod: never affect the global directory — please report this as a bug\n", target)
+	return false
 }

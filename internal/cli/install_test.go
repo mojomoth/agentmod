@@ -84,6 +84,8 @@ func TestInstallGstackClonesIntoProject(t *testing.T) {
 	wantContains(t, "stdout", stdout, "Cloning gstack from "+fixture)
 	wantContains(t, "stdout", stdout, "Installed gstack to "+target)
 	wantContains(t, "stdout", stdout, "project-local")
+	// fakeEnv has no HOME: the pollution check reports the skip honestly.
+	wantContains(t, "stdout", stdout, "Global skills check: skipped (HOME not set")
 
 	// Atomic install leaves no temp dirs behind in the skills dir.
 	entries, err := os.ReadDir(filepath.Dir(target))
@@ -243,6 +245,161 @@ func TestInstallGstackForceWithoutExisting(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(target, "SKILL.md")); err != nil {
 		t.Errorf("cloned SKILL.md missing: %v", err)
 	}
+}
+
+func TestDiffListings(t *testing.T) {
+	cases := []struct {
+		name           string
+		before, after  []string
+		added, removed []string
+	}{
+		{"both empty", nil, nil, nil, nil},
+		{"identical", []string{"a", "b"}, []string{"a", "b"}, nil, nil},
+		{"added one", []string{"a"}, []string{"a", "b"}, []string{"b"}, nil},
+		{"added into empty", nil, []string{"x"}, []string{"x"}, nil},
+		{"removed one", []string{"a", "b"}, []string{"b"}, nil, []string{"a"}},
+		{"removed all", []string{"a", "b"}, nil, nil, []string{"a", "b"}},
+		{"added and removed", []string{"a", "c"}, []string{"b", "c", "d"}, []string{"b", "d"}, []string{"a"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			added, removed := diffListings(tc.before, tc.after)
+			if !slicesEqual(added, tc.added) || !slicesEqual(removed, tc.removed) {
+				t.Errorf("diffListings(%v, %v) = added %v removed %v, want added %v removed %v",
+					tc.before, tc.after, added, removed, tc.added, tc.removed)
+			}
+		})
+	}
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestInstallGstackGlobalSkillsUnchanged(t *testing.T) {
+	requireGit(t)
+	fixture := makeGstackFixtureRepo(t)
+	root := makeProject(t, config.Default())
+	home := t.TempDir()
+	skills := filepath.Join(home, ".claude", "skills")
+	if err := os.MkdirAll(filepath.Join(skills, "gstack"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skills, "other-skill"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A PRE-EXISTING global gstack (the dev-machine D010 situation) must not
+	// trip the check — only a before/after delta is a violation.
+	code, stdout, stderr := runInstallForTest(t, fakeEnv(root, map[string]string{
+		gstackSourceEnvVar: fixture,
+		"HOME":             home,
+	}))
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, ExitOK, stdout, stderr)
+	}
+	wantContains(t, "stdout", stdout, "Global skills check: "+skills+" unchanged")
+	if strings.Contains(stderr, "VIOLATION") {
+		t.Errorf("pre-existing global entries reported as a violation:\n%s", stderr)
+	}
+	entries, err := os.ReadDir(skills)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Errorf("global skills dir changed: %d entries, want 2", len(entries))
+	}
+}
+
+func TestInstallGstackGlobalDeltaViolation(t *testing.T) {
+	requireGit(t)
+	fixture := makeGstackFixtureRepo(t)
+	root := makeProject(t, config.Default())
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Point the fake global skills dir AT the project-local skills dir via a
+	// symlink: the (legitimate, project-local) install then shows up as a new
+	// entry in the "global" listing, exercising the real violation path
+	// end-to-end without any production test hook.
+	projectSkills := filepath.Join(root, ".agentmod", "claude", "skills")
+	if err := os.Symlink(projectSkills, filepath.Join(home, ".claude", "skills")); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runInstallForTest(t, fakeEnv(root, map[string]string{
+		gstackSourceEnvVar: fixture,
+		"HOME":             home,
+	}))
+	if code != ExitError {
+		t.Fatalf("exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, ExitError, stdout, stderr)
+	}
+	wantContains(t, "stderr", stderr, "VIOLATION")
+	wantContains(t, "stderr", stderr, "new entries: gstack")
+	wantContains(t, "stderr", stderr, "report this as a bug")
+	// The local install itself succeeded and is reported before the check.
+	wantContains(t, "stdout", stdout, "Installed gstack to ")
+	// The not-touched success paragraph must NOT print after a violation.
+	if strings.Contains(stdout, "was not touched") {
+		t.Errorf("success paragraph printed despite violation:\n%s", stdout)
+	}
+}
+
+func TestInstallGstackGlobalCheckUnreadableSkips(t *testing.T) {
+	requireGit(t)
+	fixture := makeGstackFixtureRepo(t)
+	root := makeProject(t, config.Default())
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// skills is a regular file: ReadDir fails with ENOTDIR, the check skips
+	// with a note instead of failing the install.
+	if err := os.WriteFile(filepath.Join(home, ".claude", "skills"), []byte("not a dir\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runInstallForTest(t, fakeEnv(root, map[string]string{
+		gstackSourceEnvVar: fixture,
+		"HOME":             home,
+	}))
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, ExitOK, stdout, stderr)
+	}
+	wantContains(t, "stdout", stdout, "Global skills check: skipped (cannot read ")
+}
+
+func TestVerifyGlobalSkillsRemovedEntry(t *testing.T) {
+	home := t.TempDir()
+	skills := filepath.Join(home, ".claude", "skills")
+	if err := os.MkdirAll(skills, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a", "b"} {
+		if err := os.WriteFile(filepath.Join(skills, name), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := fakeEnv(t.TempDir(), map[string]string{"HOME": home})
+	before := snapshotGlobalSkills(env)
+	if err := os.Remove(filepath.Join(skills, "b")); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errBuf strings.Builder
+	if verifyGlobalSkillsUnchanged(before, "/fake/target", &out, &errBuf, env) {
+		t.Fatalf("removed entry not reported as a violation\nstdout:\n%s\nstderr:\n%s", out.String(), errBuf.String())
+	}
+	wantContains(t, "stderr", errBuf.String(), "VIOLATION", "entries that disappeared: b")
 }
 
 func TestInstallGstackForceCloneFailureKeepsOld(t *testing.T) {

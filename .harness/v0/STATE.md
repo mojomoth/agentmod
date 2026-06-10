@@ -1,15 +1,15 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 4 slice 2 — install gstack
---force)
+Last updated: 2026-06-11 (iteration: Phase 4 slice 3 — install gstack
+global pollution verification)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
   both shell hooks + rc editor + env-hygiene integration tests + the
   first-session diagnosis). Phase 3 COMPLETE (six doctor slices + guard
   claude-bash + guard wiring T17 + auth copy-on-consent T15). Phase 4
-  IN PROGRESS: install gstack clone + --force landed; remaining: pollution
-  verification, error-reporting tests.
+  IN PROGRESS: install gstack clone + --force + pollution verification
+  landed; remaining: distinct error-reporting tests (last item).
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -451,6 +451,29 @@ Last updated: 2026-06-11 (iteration: Phase 4 slice 2 — install gstack
     Usage text in cli.go mentions --force.
   - Binary smoke in /tmp passed: install v1 → no-force abort exit 1 →
     --force → SKILL.md is v2, old marker gone, no stray entries.
+- install gstack global pollution verification LANDED and green (Phase 4
+  slice 3 ✅, D032): `snapshotGlobalSkills`/`diffListings`/
+  `verifyGlobalSkillsUnchanged` in install.go. Read D030–D032 before
+  touching installer code.
+  - Snapshot of `$HOME/.claude/skills` (injected-Env HOME only) is the
+    FIRST thing installGstack does; compared after the swap, before the
+    success paragraph. Delta → stderr VIOLATION naming added/removed
+    entries + manual-removal/bug-report instructions, exit 1, success
+    paragraph suppressed, local install left in place. Absent dir = empty
+    listing — only a DELTA violates, never existence (D010 safe). HOME
+    unset / unreadable dir → stdout "Global skills check: skipped (…)",
+    exit 0. New stdout line on every install ("…: <dir> unchanged" when
+    clean).
+  - Violation path is tested END-TO-END with no production test hook:
+    fake HOME's `.claude/skills` is a SYMLINK to the project-local skills
+    dir, so the legitimate install appears as a new "global" entry.
+    7 new test funcs/tables in install_test.go (diffListings ×7 +
+    slicesEqual helper, unchanged-line w/ pre-existing global entries,
+    delta violation, ENOTDIR skip, removed-entry direct); existing happy
+    path grew the HOME-unset skip-line assertion.
+  - Binary smoke in /tmp passed: install against real HOME printed
+    "Global skills check: /Users/…/.claude/skills unchanged" (read-only),
+    exit 0.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -485,30 +508,32 @@ other two homes and the skills list unchanged; no agentmod artifacts.)
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 4, third item: "global before/after pollution verification + abort
-path (+ tests)" per IMPLEMENTATION_PLAN §10: record the global
-`~/.claude/skills` listing (via injected Env HOME, like doctor's
-gstackRelGlobal) before the clone and after the swap; any delta → report
-VIOLATION naming the new entries and instruct cleanup, nonzero exit.
-Defense in depth — the clone targets a project-local temp dir and cannot
-write there, but verify anyway. Notes:
-- Read the listing through env.LookupEnv("HOME") only; HOME unset → skip
-  the verification with a printed note (cannot compare), do NOT fail.
-- The dev machine's own global gstack (D010) must NOT trip it — only a
-  before/after DELTA counts, never mere existence (doctor already warns on
-  existence).
-- Tests with a fake HOME: unchanged listing → silent ok; a test hook is
-  needed to simulate a delta (e.g. plant a file in the fake global skills
-  dir between snapshot points is impossible from outside — consider
-  comparing against a listing taken before MkdirAll and after rename, and
-  simulate by pre-creating the delta via AGENTMOD_GSTACK_SOURCE pointing at
-  a repo whose clone legitimately succeeds while the test itself mutates
-  fake-global between... simplest honest test: factor the compare into a
-  pure func compareGstackListings(before, after) and unit-test it, plus one
-  integration test that the happy path prints the "global skills unchanged"
-  line). Decide shape next iteration; record in a new D.
-- Item 4 (distinct no-git/network/setup error reporting) stays a separate
-  iteration.
+Phase 4, final item: "error reporting: no git, network failure, setup
+failure (+ tests)" per IMPLEMENTATION_PLAN §10 "Distinct errors:
+not-a-project / git-missing / network / target-exists". Audit what already
+exists vs what's missing:
+- not-a-project (exit 2 + 'agentmod init' remedy) and target-exists
+  (--force hint) are DONE with tests; git-missing has a distinct message
+  ("install gstack needs git, which was not found on PATH") but NO test —
+  it uses real exec.LookPath, so the test must run the command with a
+  crippled process PATH (exec.LookPath reads the real env; consider
+  t.Setenv("PATH", emptyDir) — t.Setenv on PATH is fine, it's not HOME/
+  global agent state).
+- network/clone failure currently prints "git clone failed: <err>\n<git
+  output>" — decide whether that satisfies "distinct" (git's own stderr
+  names the cause: could not resolve host vs repository not found) or
+  whether agentmod should classify. Lean minimal: keep git's output as the
+  diagnosis, add a test asserting the git stderr is FORWARDED (the existing
+  clone-failure test only checks our prefix), plus a hint line about
+  AGENTMOD_GSTACK_SOURCE/network. Record the choice in a D.
+- "setup failure" from the TASKS wording = local FS failures (MkdirAll/
+  rename) — already distinct via %v passthrough; a test would need fault
+  injection (e.g. skills dir as a read-only dir or a FILE at claude/skills
+  blocking MkdirAll — the latter is easy and honest).
+- After this, Phase 4 is COMPLETE → next is Phase 5 (handoff create,
+  .amod writer). Re-read FABLE_PLAN §17–§20 + IMPLEMENTATION_PLAN §12
+  before starting it; remember D028's exclusion-list note (consent-copied
+  auth files MUST be excluded).
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

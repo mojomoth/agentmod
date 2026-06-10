@@ -493,3 +493,41 @@ routed, so neither leak exists). Broken config = defaults (enabled, partial).
   false — the hook only fires when Claude actually runs with the routed
   home, which is exactly when the guard should act; routing disablement is
   the hook's natural off switch.
+
+## D028 — 2026-06-11 — T15: auth copy-on-consent lives in init (auth.go)
+- **Placement**: `bootstrapAuth(agentmodDir, opts, stdout, env)` in new
+  `internal/cli/auth.go`, called by runInit AFTER the Shell hook lines and
+  hook-activation notice, BEFORE the closing status hint — prompts and the
+  aligned `Claude auth:` / `Codex auth:` summary lines print together at
+  the natural position. Doctor stays strictly read-only (D021/D023): it
+  reports auth state; only init copies, and only with consent.
+- **Decision ladder per agent** (first match wins): darwin Claude →
+  Keychain note, no file flow at all (no prompt even if a global
+  .credentials.json exists — the file is not how Claude authenticates on
+  macOS); local auth present (Lstat, any type) → "already present, left
+  untouched", no prompt; HOME unset → cannot-locate line + re-login remedy;
+  global auth absent → "no global auth to copy" + remedy; global auth
+  non-regular → refuse + remedy, no prompt; `--yes`/`--non-interactive` →
+  "non-interactive mode never copies auth" + remedy, never reads stdin;
+  else prompt `[y/N]` on stdout, read env.Stdin (D026). Only explicit
+  y/yes (case-insensitive) consents — EOF, nil stdin, read errors, empty
+  answers all decline. Decline is never an error: exit stays 0.
+- **Copy mechanics**: read global file (read-only access to global homes is
+  allowed; writes never), write local with O_CREATE|O_EXCL mode 0600
+  (`copyAuthFile`). Copy failure → init exits 1 (like other init steps).
+- **One shared bufio.Reader per init run** (`authPrompter`): consecutive
+  prompts must not lose buffered input between them; a final partial line
+  without trailing newline still counts as an answer.
+- **Shared strings**: re-login remedies extracted to `claudeReloginRemedy`/
+  `codexReloginRemedy` consts in doctor.go, used by both doctor findings
+  and init decline paths. Global home dir names `globalClaudeDirName`/
+  `globalCodexDirName` live in auth.go.
+- **Config not consulted** (mirrors D027): the prompt fires even if the
+  agent's routing is disabled in agentmod.toml — init does not load config,
+  and the per-run explicit consent IS the gate; copying into an unused home
+  is harmless and saves a step when routing is re-enabled.
+- **Exclusion-list note for Phase 5**: consent-copied targets are exactly
+  `claude/.credentials.json` and `codex/auth.json` relative to .agentmod/
+  (constants claudeAuthFile/codexAuthFile in doctor.go + layout dir names).
+  The T20 exclusion engine must hardcode these; authSpec's doc comment
+  marks the spot.

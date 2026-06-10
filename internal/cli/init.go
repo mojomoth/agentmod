@@ -146,6 +146,10 @@ func runInit(args []string, stdout, stderr io.Writer, env Env) int {
 	if notice := hookActivationNotice(hookRes, cwd, env); notice != "" {
 		fmt.Fprint(stdout, notice)
 	}
+	if err := bootstrapAuth(agentmodDir, opts, stdout, env); err != nil {
+		fmt.Fprintf(stderr, "agentmod: %v\n", err)
+		return ExitError
+	}
 	fmt.Fprintf(stdout, "Run 'agentmod status' to see where agent homes will route.\n")
 	return ExitOK
 }

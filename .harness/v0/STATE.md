@@ -1,14 +1,14 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 3 — init wires guard into
-.agentmod/claude/settings.json, T17; Env.Executable injection)
+Last updated: 2026-06-11 (iteration: Phase 3 — auth copy-on-consent in
+init, T15)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
   both shell hooks + rc editor + env-hygiene integration tests + the
   first-session diagnosis). Phase 3 IN PROGRESS: all five doctor slices +
-  guard claude-bash + guard wiring (T17) done; auth copy-on-consent + the
-  new doctor guard-state finding remain.
+  guard claude-bash + guard wiring (T17) + auth copy-on-consent (T15)
+  done; ONLY the doctor guard-state finding remains, then Phase 4.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -357,6 +357,29 @@ Last updated: 2026-06-11 (iteration: Phase 3 — init wires guard into
   - Follow-up task added to TASKS.md Phase 3: doctor finding for guard
     wired/stale-binary state (IMPLEMENTATION_PLAN §11 "re-resolved by
     doctor"; deliberately NOT part of T17, see D027).
+- auth copy-on-consent LANDED and green (T15 ✅, D028): new
+  `internal/cli/auth.go` (`bootstrapAuth`/`bootstrapOneAuth`/`authPrompter`/
+  `copyAuthFile`), called by runInit after the hook-activation notice; init
+  output gained aligned `Claude auth:` / `Codex auth:` lines. Read D028
+  before touching auth code.
+  - Decision ladder per agent (first match wins): darwin Claude → Keychain
+    note, NO file flow; local auth present → left untouched, no prompt;
+    HOME unset / global absent / global non-regular → remedy line, no
+    prompt; NonInteractive → never reads stdin, never copies; else `[y/N]`
+    prompt on stdout reading env.Stdin (D026). Only explicit y/yes copies;
+    EOF/nil-stdin/anything-else declines; decline is exit 0.
+  - Copy = ReadFile global + O_CREATE|O_EXCL write, mode 0600. One shared
+    bufio.Reader across both prompts (partial final line counts).
+  - Shared strings: `claudeReloginRemedy`/`codexReloginRemedy` consts now
+    in doctor.go (agentHomeFindings uses them too);
+    `globalClaudeDirName`/`globalCodexDirName` in auth.go.
+  - Config deliberately not consulted (D027 pattern): explicit consent is
+    the gate, not claude.enabled.
+  - Phase 5 NOTE: consent-copied targets `claude/.credentials.json` +
+    `codex/auth.json` (rel to .agentmod/) MUST be on the T20 exclusion
+    list — D028 records this.
+  - 10 test funcs in auth_test.go (all fake-HOME via injected Env;
+    sk-FAKE fixture values). No existing test needed changes.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -389,28 +412,34 @@ mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 3: "auth copy-on-consent: detect, prompt, copy/decline/non-interactive
-paths" (TASKS.md Phase 3 top unchecked, T15). Before writing code:
-- Read FABLE_PLAN §12 (auth bootstrapping) + §15.1/15.2 (per-agent auth
-  files) and IMPLEMENTATION_PLAN §9 (copy-on-consent design). Doctor slice 3
-  already named the auth files: `claude/.credentials.json` (Linux path;
-  macOS auth is Keychain — copy is moot there, D025 keychain note) and
-  `codex/auth.json` — constants live in doctor.go; REUSE them (consider
-  extracting to a shared location rather than duplicating).
-- Decide where the prompt fires: as part of init (interactive mode only) per
-  the plan. `--yes`/`--non-interactive` (already threaded through
-  initOptions.NonInteractive) must NEVER prompt and NEVER copy — that
-  enforcement is THIS task's matrix row (T15). Prompt must read env.Stdin
-  (D026: never os.Stdin).
-- Consent yes → copy global auth file into the routed home (file mode 0600;
-  source = real global home located via env HOME — READ-ONLY access to
-  global homes is allowed, writes are not). Decline → print re-login
-  instructions (doctor slice 3 detail strings already have the wording).
-- Copied auth files must be in the handoff exclusion list later (T15 matrix
-  row notes this; Phase 5's exclusion engine consumes it).
-- Tests: consent-copy (fake global home via injected env), decline,
-  non-interactive never copies, missing global auth = nothing to offer,
-  macOS (env.GOOS darwin) Claude path = Keychain note instead of file copy.
+Phase 3 (last item): "doctor: guard hook wired / stale-binary-path finding
+in claude/settings.json" (TASKS.md Phase 3 top unchecked). Before writing
+code:
+- Read D027 (why doctor owns this, not init) + D021 (doctor framework,
+  severity policy) + claudesettings.go. IMPLEMENTATION_PLAN §11 says the
+  binary path is "re-resolved by doctor".
+- The wiring logic to reuse: claudesettings.go already parses settings.json
+  and knows the ownership marker ("guard claude-bash" substring) and the
+  expected command (`shellQuote(filepath.Clean(bin)) + " guard
+  claude-bash"`). Extract/reuse its inspection half rather than duplicating
+  JSON walking in doctor.go (mirror how rcfile.go grew
+  locateRCBlock/inspectRCBlock for doctor slice 1).
+- Finding shape (inside project only, label e.g. "Claude guard"): wired
+  with current binary → ok; file/hook missing → warn "re-run 'agentmod
+  init'"; stale binary path (marker present, command != expected for the
+  CURRENT executable) → warn naming both paths, remedy = re-run init
+  (D027: init repairs in place); settings.json invalid → error (parse
+  failure is already a hard error in init; doctor should report, not die).
+  Unresolvable env.Executable → ok-level note (can't compare).
+- Severity: respect D021's outside-project policy (no line outside a
+  project — guard lives in the project's routed home).
+- Tests: wired-ok, missing-file warn, missing-hook warn, stale-path warn
+  (write settings with a different binary path), invalid-JSON error,
+  Executable-nil note. doctor_test.go's mkLayout writes no settings.json
+  today — decide whether healthy fixture gains one (TestDoctorAllHealthy
+  will need the new ok/warn line either way).
+- After this lands, Phase 3 is COMPLETE; next is Phase 4 (gstack installer,
+  reuse gstackRelGlobal/gstackRelProject constants from doctor.go).
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

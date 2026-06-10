@@ -39,7 +39,7 @@ Add/split items freely; keep units small.
 - [x] doctor: macOS Keychain note; gstack global-risk check (+ tests)
 - [x] guard claude-bash: stdin contract, deny rules, fail-safe (+ table tests)
 - [x] init wires guard into .agentmod/claude/settings.json (+ tests)
-- [ ] auth copy-on-consent: detect, prompt, copy/decline/non-interactive paths (+ tests)
+- [x] auth copy-on-consent: detect, prompt, copy/decline/non-interactive paths (+ tests)
 - [ ] doctor: guard hook wired / stale-binary-path finding in claude/settings.json (+ tests)
 
 ## Phase 4 — gstack

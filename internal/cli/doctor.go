@@ -178,6 +178,13 @@ const (
 	codexAuthFile  = "auth.json"
 )
 
+// Exact re-login instructions (§12), shared by doctor's auth findings and
+// init's copy-on-consent decline/non-interactive paths (auth.go).
+const (
+	claudeReloginRemedy = "claude may ask you to log in here; complete it once by running 'claude' inside this project"
+	codexReloginRemedy  = "re-login needed: run 'codex login' inside this project"
+)
+
 // agentHomeFindings reports each agent's project-local home state (§23),
 // including auth present / re-login needed per §12. Auth absence is ok-level
 // (D023): a fresh project legitimately has no auth yet, so the finding
@@ -188,11 +195,11 @@ func agentHomeFindings(proj *project.Project, cfg config.Config, cfgOK bool) []f
 	return []finding{
 		agentAuthFinding("Claude home",
 			filepath.Join(proj.AgentmodDir, layout.ClaudeDir), claudeAuthFile,
-			"claude may ask you to log in here; complete it once by running 'claude' inside this project",
+			claudeReloginRemedy,
 			!cfgOK || cfg.Claude.Enabled, "claude.enabled = false"),
 		agentAuthFinding("Codex home",
 			filepath.Join(proj.AgentmodDir, layout.CodexDir), codexAuthFile,
-			"re-login needed: run 'codex login' inside this project",
+			codexReloginRemedy,
 			!cfgOK || cfg.Codex.Enabled, "codex.enabled = false"),
 		opencodeConfigFinding(proj.AgentmodDir, !cfgOK || cfg.OpenCode.Enabled),
 	}

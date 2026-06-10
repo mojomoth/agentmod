@@ -218,3 +218,28 @@ empty→"/" guard for the upward walk.
   a tty prints prompts + a job-control notice on stderr, so that test
   asserts stdout only. bash resolves its starting dir physically when PWD is
   not inherited (same EvalSymlinks gotcha as zsh).
+
+## D019 — 2026-06-10 — rc fenced-block editor (T08)
+`agentmod init` installs the shell hook by editing the user's rc file with a
+fenced block (FABLE_PLAN §12); code in `internal/cli/rcfile.go`.
+- **Block content** (per shell): `# >>> agentmod >>>`, a managed-by comment,
+  `command -v agentmod >/dev/null 2>&1 && eval "$(agentmod hook <shell>)"`,
+  `# <<< agentmod <<<`. The `command -v` guard keeps shells quiet if the
+  binary is later uninstalled or off PATH (rc files outlive binaries).
+- **rc file choice**: zsh → `${ZDOTDIR:-$HOME}/.zshrc` (created if missing).
+  bash → existing `~/.bashrc`, else existing `~/.bash_profile`, else create
+  `~/.bashrc` (macOS login shells read .bash_profile; prefer whichever file
+  the user actually maintains, never create a second one).
+- **Shell detection**: basename of `$SHELL` via Env.LookupEnv. Unsupported
+  shell, or SHELL/HOME unset → "skipped (…)" on the Shell hook line, exit 0
+  — init never fails over exotic shells; it points at `agentmod hook`.
+- **Editing semantics**: a marker is any line whose TrimSpace equals it.
+  Absent → append (newline glue when the file lacks a trailing \n; create
+  0644). Present and identical → zero writes. Present and stale → replace
+  the fence in place; bytes outside the fence are byte-preserved (tested).
+  Corrupt fence (begin without end, or >1 begin) → hard error naming the
+  file, nothing written — guessing risks eating user config.
+- **Test injection**: rc paths derive ONLY from Env (HOME/ZDOTDIR/SHELL), so
+  tests run on throwaway homes and the dev guard never fires.
+  `ensureShellHook` checks --no-shell-hook before computing any path
+  (that's T06's enforcement row, now tested for real).

@@ -50,13 +50,11 @@ func parseInitFlags(args []string) (initOptions, error) {
 	return opts, nil
 }
 
-// runInit implements the layout-creating core of `agentmod init`
-// (FABLE_PLAN §12, IMPLEMENTATION_PLAN §4): the .agentmod/ tree,
-// agentmod.toml with defaults, the opencode.json stub, and the .gitignore
-// entry, always at the current directory. It never deletes or overwrites
-// anything that exists, so re-running is safe and only fills gaps.
-// Shell-hook installation itself is a later step (T08); the flags that
-// control it are already parsed and reported here.
+// runInit implements `agentmod init` (FABLE_PLAN §12, IMPLEMENTATION_PLAN
+// §4): the .agentmod/ tree, agentmod.toml with defaults, the opencode.json
+// stub, the .gitignore entry, and the fenced rc-file hook block, always at
+// the current directory. It never deletes or overwrites anything that
+// exists, so re-running is safe and only fills gaps.
 func runInit(args []string, stdout, stderr io.Writer, env Env) int {
 	opts, err := parseInitFlags(args)
 	if err != nil {
@@ -122,6 +120,11 @@ func runInit(args []string, stdout, stderr io.Writer, env Env) int {
 		fmt.Fprintf(stderr, "agentmod: %v\n", err)
 		return ExitError
 	}
+	hookStatus, err := ensureShellHook(opts, env)
+	if err != nil {
+		fmt.Fprintf(stderr, "agentmod: %v\n", err)
+		return ExitError
+	}
 
 	if reinit {
 		fmt.Fprintf(stdout, "AgentMod: already initialized at %s\n", cwd)
@@ -132,16 +135,9 @@ func runInit(args []string, stdout, stderr io.Writer, env Env) int {
 	fmt.Fprintf(stdout, "  agentmod.toml:   %s\n", describeWrite(wroteConfig, "defaults"))
 	fmt.Fprintf(stdout, "  opencode.json:   %s\n", describeWrite(wroteStub, "stub"))
 	fmt.Fprintf(stdout, "  .gitignore:      %s\n", gitignoreStatus)
-	fmt.Fprintf(stdout, "  Shell hook:      %s\n", describeShellHook(opts))
+	fmt.Fprintf(stdout, "  Shell hook:      %s\n", hookStatus)
 	fmt.Fprintf(stdout, "Run 'agentmod status' to see where agent homes will route.\n")
 	return ExitOK
-}
-
-func describeShellHook(opts initOptions) string {
-	if opts.NoShellHook {
-		return "skipped (--no-shell-hook)"
-	}
-	return "not installed yet (rc-file setup lands with 'agentmod hook zsh')"
 }
 
 // writeIfAbsent creates path with data only when no file exists there.

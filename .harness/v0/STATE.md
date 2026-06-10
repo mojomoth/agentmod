@@ -1,10 +1,11 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-10 (iteration: Phase 2 — `agentmod hook bash`, T10)
+Last updated: 2026-06-10 (iteration: Phase 2 — rc fenced-block editor, T08)
 
 ## Where things stand
-- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 items 1–7 LANDED
-  (both shell hooks done; rc fenced-block editor T08 is next).
+- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 items 1–8 LANDED
+  (init + both shell hooks + rc editor done; scripted-shell integration
+  tests T11 are next).
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -138,6 +139,23 @@ Last updated: 2026-06-10 (iteration: Phase 2 — `agentmod hook bash`, T10)
   interactive bash without tty prints prompts + job-control notice).
   Known limitation for README/doctor: hook inert in non-interactive bash
   scripts (same as direnv).
+- rc fenced-block editor LANDED and green (T08 ✅, D019): new
+  `internal/cli/rcfile.go` (`ensureShellHook`/`shellHookTarget`/
+  `ensureRCBlock`/`rcBlockFor`/`abbrevHome`), wired into runInit after
+  ensureGitignore; the `Shell hook:` placeholder line is gone — it now
+  reports installed/updated/already-installed in `~/.zshrc` (home
+  abbreviated) or a skip reason. Full contract in D019 (read it before
+  touching rc code): block = `command -v agentmod … && eval "$(agentmod
+  hook <shell>)"` between `# >>> agentmod >>>`/`# <<< agentmod <<<`;
+  zsh → ${ZDOTDIR:-$HOME}/.zshrc; bash → existing .bashrc > existing
+  .bash_profile > create .bashrc; SHELL/HOME unset or unsupported shell →
+  skip (exit 0); corrupt fence → hard error, zero writes. rc paths derive
+  ONLY from injected Env, so tests never go near real rc files.
+  10 new test funcs in rcfile_test.go (install/append-glue/idempotent/
+  stale-update-in-place/--no-shell-hook-enforcement/skips table/bash rc
+  selection ×3/ZDOTDIR/corrupt-fence ×2/zsh+bash -n block syntax).
+  init_test.go's TestInitDefaultShellHookLine updated for the new skip
+  wording ("not installed yet" placeholder no longer exists).
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -170,27 +188,28 @@ mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 2: rc fenced-block insert/update (T08; TASKS.md Phase 2 "rc
-fenced-block insert/update, never duplicate, never touch user content";
-FABLE_PLAN §14, IMPLEMENTATION_PLAN §7). This is the piece init's
-`Shell hook:` placeholder line promised: edit the USER's rc file
-(~/.zshrc for zsh, ~/.bashrc or ~/.bash_profile for bash) to add a
-fenced block that evals `agentmod hook <shell>`. Requirements:
-- Fenced markers (e.g. `# >>> agentmod >>>` / `# <<< agentmod <<<`);
-  insert if absent, update in place if present, NEVER duplicate, never
-  touch anything outside the fence; preserve file bytes around it.
-- init consumes initOptions.NoShellHook (already threaded through
-  runInit) — with the flag, report "skipped (--no-shell-hook)" and do
-  NOT edit any rc file (this is T08's enforcement matrix row from T06).
-- CRITICAL test constraint: the PreToolUse guard + LOOP rules forbid
-  touching the real user's rc files; the rc-path lookup MUST be
-  injectable (derive from Env / an explicit home parameter consumed by
-  OUR code — pattern already exists via cli.Env). Tests work on temp rc
-  files only. Decide + record in DECISIONS: which rc file per shell,
-  what the block contains (likely `eval "$(agentmod hook zsh)"` guarded
-  by `command -v agentmod`), how init picks the shell ($SHELL via Env),
-  and idempotency (T05's folded "no dup rc block" row).
-- init output replaces the "not installed yet" placeholder.
+Phase 2: scripted-shell integration tests (T11; TASKS.md Phase 2
+"scripted-shell integration tests: activate/deactivate/cross-project,
+PATH dedup, HOME untouched"; TEST_MATRIX T11 "env hygiene"). The hook
+tests (T09/T10) already cover single transitions per shell; T11 is the
+HYGIENE matrix on top:
+- Repeated transitions (in→out→in→…, A→B→A cross-project) leave NO
+  duplicate PATH entries — assert PATH equals the original after exit
+  and contains exactly one `.agentmod/node/bin` entry while inside.
+- Pre-existing user values of every routed var (CLAUDE_CONFIG_DIR,
+  CODEX_HOME, OPENCODE_CONFIG, NPM_CONFIG_*, PNPM_HOME, BUN_INSTALL)
+  survive a full round-trip: set sentinel values before eval'ing the
+  hook, cd through projects, cd out, compare full `env` before/after
+  (FABLE_PLAN §7 "perfect inverse — tested by scripted shell sessions
+  comparing env before/after").
+- HOME never changes at any point; no `AGENTMOD_*` remains after exit;
+  no shim files appear anywhere (scan the project + a fake bin dir).
+- Run the same matrix in BOTH zsh and bash. Reuse hook_test.go's
+  fakeAgentmodBin/childEnv/lineAfter + hook_bash_test.go's runBash
+  harness — do NOT invent a new one. Read D016/D017/D018 first.
+- Likely shape: a new integration_test.go in internal/cli with a
+  table over {zsh, bash} × scenario scripts that dump `env | sort`
+  at checkpoints and diff them in Go.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

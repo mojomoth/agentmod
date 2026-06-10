@@ -277,13 +277,15 @@ func TestInitFlagNoShellHook(t *testing.T) {
 }
 
 func TestInitDefaultShellHookLine(t *testing.T) {
+	// runInitForTest leaves SHELL and HOME unset, so a plain init reports
+	// the can't-detect-shell skip — and must not claim the flag was given.
 	code, stdout, _ := runInitForTest(t, t.TempDir())
 	if code != ExitOK {
 		t.Fatalf("exit = %d, want %d", code, ExitOK)
 	}
-	wantContains(t, "stdout", stdout, "Shell hook:      not installed yet")
+	wantContains(t, "stdout", stdout, "Shell hook:      skipped ($SHELL is not set")
 	if strings.Contains(stdout, "skipped (--no-shell-hook)") {
-		t.Errorf("plain init claims the hook was skipped:\n%s", stdout)
+		t.Errorf("plain init claims the hook was skipped by flag:\n%s", stdout)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/agentmod/agentmod/internal/config"
+	"github.com/agentmod/agentmod/internal/layout"
 	"github.com/agentmod/agentmod/internal/project"
 )
 
@@ -23,17 +24,6 @@ type Env struct {
 func osEnv() Env {
 	return Env{Getwd: os.Getwd, LookupEnv: os.LookupEnv}
 }
-
-// Layout directory names under .agentmod/ (IMPLEMENTATION_PLAN §4). Init and
-// routing will share these once they land; until then status is the source.
-const (
-	claudeDirName    = "claude"
-	codexDirName     = "codex"
-	opencodeDirName  = "opencode"
-	opencodeConfName = "opencode.json"
-	nodeDirName      = "node"
-	snapshotsDirName = "snapshots"
-)
 
 // runStatus implements `agentmod status` (FABLE_PLAN §24): a brief report of
 // whether AgentMod governs the current directory and, when it does, where
@@ -71,8 +61,7 @@ func runStatus(args []string, stdout, stderr io.Writer, env Env) int {
 		return ExitError
 	}
 
-	opencodeConfig := filepath.Join(proj.AgentmodDir, opencodeDirName, opencodeConfName)
-	opencodeLine := homeLine(cfg.OpenCode.Enabled, opencodeConfig, "opencode.enabled = false")
+	opencodeLine := homeLine(cfg.OpenCode.Enabled, layout.OpencodeConfigPath(proj.AgentmodDir), "opencode.enabled = false")
 	if cfg.OpenCode.Enabled && cfg.OpenCode.XDGFullIsolation {
 		opencodeLine += " (+ XDG full isolation)"
 	}
@@ -81,10 +70,10 @@ func runStatus(args []string, stdout, stderr io.Writer, env Env) int {
 	fmt.Fprintf(stdout, "  Project root:    %s\n", proj.Root)
 	fmt.Fprintf(stdout, "  AgentMod root:   %s\n", proj.AgentmodDir)
 	fmt.Fprintf(stdout, "  Shell routing:   %s\n", shellRoutingState(env, proj.Root))
-	fmt.Fprintf(stdout, "  Claude home:     %s\n", homeLine(cfg.Claude.Enabled, filepath.Join(proj.AgentmodDir, claudeDirName), "claude.enabled = false"))
-	fmt.Fprintf(stdout, "  Codex home:      %s\n", homeLine(cfg.Codex.Enabled, filepath.Join(proj.AgentmodDir, codexDirName), "codex.enabled = false"))
+	fmt.Fprintf(stdout, "  Claude home:     %s\n", homeLine(cfg.Claude.Enabled, filepath.Join(proj.AgentmodDir, layout.ClaudeDir), "claude.enabled = false"))
+	fmt.Fprintf(stdout, "  Codex home:      %s\n", homeLine(cfg.Codex.Enabled, filepath.Join(proj.AgentmodDir, layout.CodexDir), "codex.enabled = false"))
 	fmt.Fprintf(stdout, "  OpenCode config: %s\n", opencodeLine)
-	fmt.Fprintf(stdout, "  Node dir:        %s\n", homeLine(cfg.Node.Enabled, filepath.Join(proj.AgentmodDir, nodeDirName), "node.enabled = false"))
+	fmt.Fprintf(stdout, "  Node dir:        %s\n", homeLine(cfg.Node.Enabled, filepath.Join(proj.AgentmodDir, layout.NodeDir), "node.enabled = false"))
 	fmt.Fprintf(stdout, "  Recent handoff:  %s\n", recentHandoff(proj.AgentmodDir))
 	return ExitOK
 }
@@ -112,7 +101,7 @@ func shellRoutingState(env Env, root string) string {
 // recentHandoff names the newest .amod under .agentmod/snapshots, or "none".
 // A missing or unreadable snapshots directory simply means no handoffs yet.
 func recentHandoff(agentmodDir string) string {
-	entries, err := os.ReadDir(filepath.Join(agentmodDir, snapshotsDirName))
+	entries, err := os.ReadDir(filepath.Join(agentmodDir, layout.SnapshotsDir))
 	if err != nil {
 		return "none"
 	}

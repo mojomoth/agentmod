@@ -25,6 +25,7 @@ Usage:
   agentmod <command> [arguments]
 
 Commands:
+  init       create .agentmod/ with agent homes and default config here
   status     show whether AgentMod is active here and where agent homes route
   version    print version and exit
   help       show this help
@@ -48,6 +49,8 @@ func run(args []string, stdout, stderr io.Writer, env Env) int {
 		return ExitOK
 	}
 	switch args[0] {
+	case "init":
+		return runInit(args[1:], stdout, stderr, env)
 	case "status":
 		return runStatus(args[1:], stdout, stderr, env)
 	case "version", "--version":

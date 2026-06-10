@@ -95,3 +95,21 @@ Validation hard-rejects: `schema_version != 1`, `mode != "standard"`,
 hard-true: the Phase 5 exclusion engine enforces protected (secret/auth)
 entries as never-removable regardless of config — documented on the struct.
 Sentinels: `ErrSchemaVersion`, `ErrChangeHome`, `ErrSessionsNeedEncryption`.
+
+## D013 — 2026-06-10 — `init` always targets cwd; nested init warns, then proceeds
+`agentmod init` creates the project at the current directory, never
+redirecting to an enclosing project (FABLE_PLAN §12 says "create .agentmod/",
+and discovery is nearest-wins, so nesting is a supported concept per D011).
+When cwd is strictly inside an existing project, init prints a notice that
+the new project will shadow the outer one — running init in a subdirectory
+by accident is likely, but refusing would block legitimate nesting and §12
+defines no --force escape hatch. Re-init at an existing root is a quiet
+no-op-plus-fill: missing layout dirs are created, existing files (config,
+opencode.json, anything user-placed) are NEVER touched — enforced by
+O_CREATE|O_EXCL writes (`writeIfAbsent`), not stat-then-write races.
+`.agentmod` existing as a regular FILE is an error asking the user to move
+it aside; init never deletes. The opencode.json stub is `{"$schema":
+"https://opencode.ai/config.json"}` — an empty merge-chain layer (§3.3).
+Layout names live in `internal/layout` (shared by status/init/future
+routing); `layout.Subdirs()` excludes `opencode/xdg`, which only the opt-in
+XDG full-isolation mode creates.

@@ -20,7 +20,7 @@ Add/split items freely; keep units small.
 - [x] `agentmod status` active/inactive output (+ tests)
 
 ## Phase 2 — init + hooks
-- [ ] init: .agentmod/ layout + agentmod.toml writer (+ tests)
+- [x] init: .agentmod/ layout + agentmod.toml writer (+ tests)
 - [ ] init: .gitignore add w/ dedup + no-git-repo grace (+ tests)
 - [ ] init: idempotency guarantee tests (run twice, byte-identical results)
 - [ ] init: flags --no-shell-hook, --yes/non-interactive (+ tests)

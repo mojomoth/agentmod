@@ -1,9 +1,9 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-10 (iteration: Phase 1 task 4 — `agentmod status`)
+Last updated: 2026-06-10 (iteration: Phase 2 task 1 — `agentmod init` layout + toml writer)
 
 ## Where things stand
-- Phase 0 (harness) COMPLETE. **Phase 1 COMPLETE** (all 4 items).
+- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 item 1 LANDED.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -30,6 +30,23 @@ Last updated: 2026-06-10 (iteration: Phase 1 task 4 — `agentmod status`)
   - "Recent handoff": newest `*.amod` by mtime in `.agentmod/snapshots/`,
     else "none". Broken config → exit 1, error on stderr (Load names file).
   - 10 test funcs in status_test.go, all temp-dir/fake-Env based.
+- `agentmod init` core LANDED and green (T04 ✅): `internal/cli/init.go` +
+  new shared `internal/layout` package (status.go refactored onto it).
+  - Always inits at cwd; nested-under-existing-project prints a shadowing
+    notice and proceeds (D013). Re-init = fill missing dirs only.
+  - Never overwrites: agentmod.toml (= Marshal(Default())) and the
+    opencode.json stub are written via O_CREATE|O_EXCL (`writeIfAbsent`);
+    pre-existing files stay byte-identical (tested). `.agentmod` as a
+    regular file → error, never deleted.
+  - `layout.Subdirs()` = claude codex opencode node snapshots logs (NO
+    opencode/xdg — opt-in mode creates that later).
+  - Currently REJECTS all arguments ("init takes no arguments yet") —
+    flags (--no-shell-hook/--yes) are the T06 iteration; .gitignore editing
+    (T07) and rc-hook install (T08) are separate Phase 2 items, so init
+    output deliberately says nothing about them yet.
+  - 6 test funcs in init_test.go (fresh, re-init no-clobber incl. stray
+    user file, .agentmod-is-a-file, nested warn, re-init-at-root no warn,
+    arg rejection).
 - `gofmt -l` clean, `go vet` clean, `go test ./...` PASSES (all packages).
 
 ## Toolchain baseline (verified on this machine, 2026-06-10)
@@ -52,22 +69,22 @@ NOT a violation; only new entries/mtime changes caused by our work are.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 2, first item: `agentmod init` — `.agentmod/` layout + agentmod.toml
-writer (TEST_MATRIX T04; spec FABLE_PLAN §11/§25, IMPLEMENTATION_PLAN §4/§5).
-Suggested shape: new `internal/initcmd` (or extend cli) that
-1. discovers an existing project (re-init) vs creates at cwd;
-2. creates the §4 tree: claude/ codex/ opencode/ (+opencode.json stub)
-   node/ snapshots/ logs/ — MkdirAll, NEVER delete/overwrite existing files;
-3. writes agentmod.toml = config.Marshal(config.Default()) only when absent;
-4. extract layout dir-name constants out of internal/cli/status.go into a
-   shared package (e.g. internal/layout) and use it from both status & init.
-Defer to later Phase 2 items: .gitignore editing, rc/shell hook, flags
-(--no-shell-hook/--yes), idempotency TESTS (run-twice byte-identical — but
-design init idempotent from the start), guard wiring (Phase 3 wires
-settings.json). Tests: temp dirs only; cover fresh init, re-init no-clobber
-(pre-existing agentmod.toml/opencode.json byte-identical after), nested-cwd
-behavior (init at cwd vs existing ancestor project — check FABLE_PLAN §11 for
-which wins before coding).
+Phase 2, second item: init `.gitignore` handling (TEST_MATRIX T07; spec
+FABLE_PLAN §12 + §25, IMPLEMENTATION_PLAN §4). In runInit, after layout
+creation:
+1. add `.agentmod/` to `<cwd>/.gitignore` — create the file if missing;
+   dedup: skip if a line already equals `.agentmod/` (also accept existing
+   `.agentmod` without slash as covering — decide and record);
+2. preserve user content byte-for-byte except the appended line (append
+   with leading newline only if file lacks trailing newline);
+3. no-git-repo grace: still safe to write .gitignore? Check FABLE_PLAN §12
+   wording ("behave gracefully when the directory is not a git repo") —
+   likely: skip silently or note it; decide, record in DECISIONS.md;
+   detect via `.git` existence at cwd, NOT by running git (no exec).
+4. extend init output with a `.gitignore:` line; tests: created/appended/
+   deduped/non-git cases + byte-preservation of surrounding content.
+Keep run-twice byte-identical (T05 territory) in mind: dedup must make the
+second run a no-op.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

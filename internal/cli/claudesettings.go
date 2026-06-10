@@ -83,29 +83,11 @@ func ensureClaudeGuardHook(agentmodDir string, env Env) (string, error) {
 	}
 
 	found, changed := false, false
-	for _, entry := range pre {
-		entryMap, ok := entry.(map[string]any)
-		if !ok {
-			continue
-		}
-		inner, ok := entryMap["hooks"].([]any)
-		if !ok {
-			continue
-		}
-		for _, h := range inner {
-			hookMap, ok := h.(map[string]any)
-			if !ok {
-				continue
-			}
-			cmd, ok := hookMap["command"].(string)
-			if !ok || !strings.Contains(cmd, guardHookMarker) {
-				continue
-			}
-			found = true
-			if cmd != desired {
-				hookMap["command"] = desired
-				changed = true
-			}
+	for _, hookMap := range guardHookEntries(pre) {
+		found = true
+		if hookMap["command"].(string) != desired {
+			hookMap["command"] = desired
+			changed = true
 		}
 	}
 	if !found {
@@ -128,6 +110,78 @@ func ensureClaudeGuardHook(agentmodDir string, env Env) (string, error) {
 		return "guard hook binary path updated in .agentmod/claude/settings.json", nil
 	}
 	return "guard hook added to existing .agentmod/claude/settings.json", nil
+}
+
+// guardHookEntries returns, in document order, every hook map under the
+// PreToolUse entries whose command string carries the ownership marker.
+// Shared by the writer above (which mutates the returned maps in place) and
+// the read-only inspector below; a returned map always has a string
+// "command" containing guardHookMarker.
+func guardHookEntries(pre []any) []map[string]any {
+	var ours []map[string]any
+	for _, entry := range pre {
+		entryMap, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		inner, ok := entryMap["hooks"].([]any)
+		if !ok {
+			continue
+		}
+		for _, h := range inner {
+			hookMap, ok := h.(map[string]any)
+			if !ok {
+				continue
+			}
+			if cmd, ok := hookMap["command"].(string); ok && strings.Contains(cmd, guardHookMarker) {
+				ours = append(ours, hookMap)
+			}
+		}
+	}
+	return ours
+}
+
+// Wiring states inspectGuardHook distinguishes (doctor's subject; D029).
+type guardHookState int
+
+const (
+	guardHookFileAbsent guardHookState = iota // settings.json does not exist
+	guardHookMissing                          // file exists, no marker hook in it
+	guardHookStale                            // marker hook present, command != desired
+	guardHookCurrent                          // marker hook present with the desired command
+)
+
+// inspectGuardHook reports the guard hook's wiring state in the settings
+// file at path, strictly read-only. desired is the command expected for the
+// current binary; foundCmd carries the first marker hook's command so a
+// stale finding can name what the file actually points at. Unreadable or
+// structurally invalid files return the same hard errors the writer raises.
+func inspectGuardHook(path, desired string) (state guardHookState, foundCmd string, err error) {
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return guardHookFileAbsent, "", nil
+	}
+	if err != nil {
+		return 0, "", err
+	}
+	settings, err := parseSettings(path, raw)
+	if err != nil {
+		return 0, "", err
+	}
+	_, pre, err := guardHookSlice(path, settings)
+	if err != nil {
+		return 0, "", err
+	}
+	entries := guardHookEntries(pre)
+	if len(entries) == 0 {
+		return guardHookMissing, "", nil
+	}
+	for _, e := range entries {
+		if e["command"].(string) == desired {
+			return guardHookCurrent, desired, nil
+		}
+	}
+	return guardHookStale, entries[0]["command"].(string), nil
 }
 
 // parseSettings decodes an existing settings.json. A whitespace-only file is

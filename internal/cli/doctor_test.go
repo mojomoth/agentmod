@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +14,9 @@ import (
 )
 
 // mkLayout creates the init-managed directories under root/.agentmod plus
-// the opencode.json stub, so the layout and OpenCode-config checks pass.
+// the opencode.json stub and the guard-wired claude/settings.json (built for
+// fakeBinPath, fakeEnv's Executable answer), so the layout, OpenCode-config,
+// and Claude-guard checks pass — matching what init guarantees.
 func mkLayout(t *testing.T, root string) {
 	t.Helper()
 	for _, sub := range layout.Subdirs() {
@@ -25,6 +28,24 @@ func mkLayout(t *testing.T, root string) {
 	if err := os.WriteFile(stub, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeGuardSettings(t, root, guardHookCommand(fakeBinPath))
+}
+
+// writeGuardSettings (over)writes root/.agentmod/claude/settings.json with
+// exactly one guard hook running command.
+func writeGuardSettings(t *testing.T, root, command string) {
+	t.Helper()
+	data, err := marshalSettings(freshGuardSettings(command))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(guardSettingsPath(root), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func guardSettingsPath(root string) string {
+	return filepath.Join(root, ".agentmod", layout.ClaudeDir, claudeSettingsFile)
 }
 
 // healthyVars builds the env-var map of a shell where the zsh hook is
@@ -95,6 +116,7 @@ func TestDoctorAllHealthy(t *testing.T) {
 	wantLevel(t, findingLine(t, stdout, "PATH"), diagOK)
 	wantLevel(t, findingLine(t, stdout, "HOME"), diagOK)
 	wantLevel(t, findingLine(t, stdout, "Claude home"), diagOK)
+	wantLevel(t, findingLine(t, stdout, "Claude guard"), diagOK)
 	wantLevel(t, findingLine(t, stdout, "Codex home"), diagOK)
 	wantLevel(t, findingLine(t, stdout, "OpenCode config"), diagOK)
 	wantLevel(t, findingLine(t, stdout, "OpenCode sessions"), diagOK)
@@ -125,6 +147,8 @@ func TestDoctorOutsideProjectFreshMachineIsClean(t *testing.T) {
 	wantLevel(t, lingering, diagOK)
 	wantContains(t, "Routing line", lingering, "no agentmod variables lingering")
 	wantLevel(t, findingLine(t, stdout, "HOME"), diagOK)
+	// The guard lives in a project's routed Claude home — no project, no line.
+	wantNoFinding(t, stdout, "Claude guard")
 	// Binary presence is reported out here too (§23), informationally.
 	binaries := findingLine(t, stdout, "Agent binaries")
 	wantLevel(t, binaries, diagOK)
@@ -215,7 +239,7 @@ func TestDoctorLayoutMissingDirs(t *testing.T) {
 	root := makeProject(t, config.Default())
 	mkLayout(t, root)
 	for _, sub := range []string{"claude", "snapshots"} {
-		if err := os.Remove(filepath.Join(root, ".agentmod", sub)); err != nil {
+		if err := os.RemoveAll(filepath.Join(root, ".agentmod", sub)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -235,7 +259,7 @@ func TestDoctorLayoutEntryNotADirectory(t *testing.T) {
 	root := makeProject(t, config.Default())
 	mkLayout(t, root)
 	claude := filepath.Join(root, ".agentmod", "claude")
-	if err := os.Remove(claude); err != nil {
+	if err := os.RemoveAll(claude); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(claude, []byte("not a dir"), 0o644); err != nil {
@@ -1033,6 +1057,102 @@ func TestDoctorGstackProjectState(t *testing.T) {
 		_, stdout, _ := runDoctorForTest(t, env)
 		wantNoFinding(t, stdout, "gstack (project)")
 	})
+}
+
+func TestDoctorGuardSettingsMissing(t *testing.T) {
+	// settings.json gone = the Bash guard is not wired at all; init recreates
+	// it, so this is degraded-recoverable → warn.
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	if err := os.Remove(guardSettingsPath(root)); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "Claude guard")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "Claude guard line", line, "missing", "not wired", "re-run 'agentmod init'")
+}
+
+func TestDoctorGuardHookMissingFromSettings(t *testing.T) {
+	// The file exists (user-managed settings) but carries no guard hook —
+	// e.g. created before T17 or hand-edited. Re-init appends it → warn.
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	if err := os.WriteFile(guardSettingsPath(root),
+		[]byte(`{"env": {"FAKE": "1"}, "hooks": {"PostToolUse": []}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "Claude guard")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "Claude guard line", line, "no guard hook in", "re-run 'agentmod init'")
+}
+
+func TestDoctorGuardStaleBinaryPath(t *testing.T) {
+	// IMPLEMENTATION_PLAN §11: the hook's absolute binary path goes stale
+	// when the binary moves; doctor names both paths, init repairs.
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	writeGuardSettings(t, root, guardHookCommand("/old/place/agentmod"))
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "Claude guard")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "Claude guard line", line,
+		"'/old/place/agentmod' guard claude-bash",
+		"'"+fakeBinPath+"' guard claude-bash",
+		"re-run 'agentmod init' to repair it",
+	)
+}
+
+func TestDoctorGuardInvalidSettingsIsError(t *testing.T) {
+	// A settings file doctor cannot parse blocks any guard statement — and
+	// init refuses to touch it too, so this is error-level, not warn.
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	if err := os.WriteFile(guardSettingsPath(root), []byte("{not json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "Claude guard")
+	wantLevel(t, line, diagError)
+	wantContains(t, "Claude guard line", line, "not a valid JSON object")
+}
+
+func TestDoctorGuardUnresolvableBinary(t *testing.T) {
+	// Without a resolvable current binary the path comparison is impossible;
+	// a wired-looking hook is reported at ok level with the caveat (the
+	// equivalent init case skips wiring, also without failing).
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	for name, fn := range map[string]func() (string, error){
+		"nil resolver":      nil,
+		"erroring resolver": func() (string, error) { return "", errors.New("fake exotic failure") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := fakeEnv(root, healthyVars(t, root))
+			env.Executable = fn
+			code, stdout, _ := runDoctorForTest(t, env)
+			if code != ExitOK {
+				t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+			}
+			line := findingLine(t, stdout, "Claude guard")
+			wantLevel(t, line, diagOK)
+			wantContains(t, "Claude guard line", line,
+				"hook present", "cannot be resolved", "binary path not verified")
+		})
+	}
 }
 
 func TestDoctorRejectsArgs(t *testing.T) {

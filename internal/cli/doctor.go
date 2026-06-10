@@ -81,6 +81,7 @@ func runDoctor(args []string, stdout, stderr io.Writer, env Env) int {
 		findings = append(findings, layoutFinding(proj.AgentmodDir))
 		findings = append(findings, agentHomeFindings(proj, cfg, cfgOK)...)
 		findings = append(findings, keychainFindings(env, cfg, cfgOK)...)
+		findings = append(findings, guardFinding(proj.AgentmodDir, env))
 		findings = append(findings, opencodeIsolationFindings(cfg, cfgOK, env)...)
 		findings = append(findings, shimFinding(proj.AgentmodDir))
 		findings = append(findings, gstackProjectFinding(proj.AgentmodDir))
@@ -380,6 +381,47 @@ func keychainFindings(env Env, cfg config.Config, cfgOK bool) []finding {
 	}
 	return []finding{{diagOK, "Claude auth (macOS)",
 		"stored in the shared macOS Keychain, not in the project-local home — accounts are shared across all config dirs; per-project account isolation is not possible on macOS (no per-project re-login needed)"}}
+}
+
+// guardFinding reports the Bash guard's wiring state in the routed Claude
+// home's settings.json (FABLE_PLAN §17; IMPLEMENTATION_PLAN §11: the hook's
+// binary path is re-resolved by doctor — init repairs it, doctor only
+// reports). Not gated on claude.enabled, matching D027: init wires the guard
+// unconditionally, so its absence is a finding regardless of routing config.
+// The hook-missing cases warn (re-init rewires); a settings file doctor
+// cannot parse is an error, same as the writer treats it. An unresolvable
+// current binary makes the path comparison impossible — ok-level note, since
+// a wired-looking hook is the best doctor can verify then.
+func guardFinding(agentmodDir string, env Env) finding {
+	path := filepath.Join(agentmodDir, layout.ClaudeDir, claudeSettingsFile)
+	desired := ""
+	var binErr error
+	if env.Executable == nil {
+		binErr = errors.New("no resolver available")
+	} else if bin, err := env.Executable(); err != nil {
+		binErr = err
+	} else {
+		desired = guardHookCommand(filepath.Clean(bin))
+	}
+
+	state, foundCmd, err := inspectGuardHook(path, desired)
+	switch {
+	case err != nil:
+		return finding{diagError, "Claude guard", err.Error()}
+	case state == guardHookFileAbsent:
+		return finding{diagWarn, "Claude guard",
+			path + " missing — the Bash guard is not wired; re-run 'agentmod init'"}
+	case state == guardHookMissing:
+		return finding{diagWarn, "Claude guard",
+			"no guard hook in " + path + " — re-run 'agentmod init' to wire it"}
+	case desired == "":
+		return finding{diagOK, "Claude guard", fmt.Sprintf(
+			"hook present in %s, but the current agentmod binary cannot be resolved (%v) — binary path not verified", path, binErr)}
+	case state == guardHookStale:
+		return finding{diagWarn, "Claude guard", fmt.Sprintf(
+			"hook in %s runs %s, but the current binary expects %s — re-run 'agentmod init' to repair it", path, foundCmd, desired)}
+	}
+	return finding{diagOK, "Claude guard", "PreToolUse Bash hook wired in " + path + " with the current binary"}
 }
 
 // Where gstack hardcodes its global install (FABLE_PLAN §3.4), relative to

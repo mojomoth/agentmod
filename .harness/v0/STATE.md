@@ -1,14 +1,14 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 3 — auth copy-on-consent in
-init, T15)
+Last updated: 2026-06-11 (iteration: Phase 3 — doctor Claude-guard wiring
+finding; Phase 3 COMPLETE)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
   both shell hooks + rc editor + env-hygiene integration tests + the
-  first-session diagnosis). Phase 3 IN PROGRESS: all five doctor slices +
-  guard claude-bash + guard wiring (T17) + auth copy-on-consent (T15)
-  done; ONLY the doctor guard-state finding remains, then Phase 4.
+  first-session diagnosis). Phase 3 COMPLETE (six doctor slices + guard
+  claude-bash + guard wiring T17 + auth copy-on-consent T15). Next: Phase 4
+  (gstack installer).
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -380,6 +380,24 @@ init, T15)
     list — D028 records this.
   - 10 test funcs in auth_test.go (all fake-HOME via injected Env;
     sk-FAKE fixture values). No existing test needed changes.
+- doctor Claude-guard wiring finding LANDED and green (Phase 3 final item ✅,
+  D029): `guardFinding(agentmodDir, env)` in doctor.go, inside-project only,
+  read-only. Read D029 (+D021/D027) before touching guard-state code.
+  - claudesettings.go grew the read-only half: `guardHookEntries(pre)`
+    (shared marker-walker; ensureClaudeGuardHook rewritten on it, write
+    behavior unchanged, T17 tests untouched) + `inspectGuardHook(path,
+    desired)` → FileAbsent/Missing/Stale/Current + found command.
+  - Severities: wired-current ok; file absent / hook absent → warn (re-run
+    init); stale command → warn naming found AND expected commands;
+    unparseable / wrong-typed file → error (writer's own hard-error
+    strings); env.Executable nil-or-erroring → ok "hook present … binary
+    path not verified" (file-absent/hook-missing warns still fire — they
+    need no binary). Not gated on claude.enabled (D027).
+  - doctor_test.go: mkLayout now writes a guard-wired settings.json for
+    fakeBinPath (`writeGuardSettings`/`guardSettingsPath` helpers — reuse
+    them), matching init's guarantee; layout tests deleting claude/ moved
+    to os.RemoveAll. 5 new test funcs + AllHealthy/fresh-machine
+    assertions extended.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -407,39 +425,30 @@ use (history.jsonl, logs_2.sqlite*, config.toml, shell_snapshots, …); zero
 agentmod-named artifacts. Not our work, not a violation. Expect this dir's
 mtime to keep moving; audit by looking for agentmod-created entries, not by
 mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
+(2026-06-11: same pattern again — `~/.codex` mtime now 6월 11 01:11, the
+other two homes and the skills list unchanged; no agentmod artifacts.)
 
 ## Failing tests
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 3 (last item): "doctor: guard hook wired / stale-binary-path finding
-in claude/settings.json" (TASKS.md Phase 3 top unchecked). Before writing
-code:
-- Read D027 (why doctor owns this, not init) + D021 (doctor framework,
-  severity policy) + claudesettings.go. IMPLEMENTATION_PLAN §11 says the
-  binary path is "re-resolved by doctor".
-- The wiring logic to reuse: claudesettings.go already parses settings.json
-  and knows the ownership marker ("guard claude-bash" substring) and the
-  expected command (`shellQuote(filepath.Clean(bin)) + " guard
-  claude-bash"`). Extract/reuse its inspection half rather than duplicating
-  JSON walking in doctor.go (mirror how rcfile.go grew
-  locateRCBlock/inspectRCBlock for doctor slice 1).
-- Finding shape (inside project only, label e.g. "Claude guard"): wired
-  with current binary → ok; file/hook missing → warn "re-run 'agentmod
-  init'"; stale binary path (marker present, command != expected for the
-  CURRENT executable) → warn naming both paths, remedy = re-run init
-  (D027: init repairs in place); settings.json invalid → error (parse
-  failure is already a hard error in init; doctor should report, not die).
-  Unresolvable env.Executable → ok-level note (can't compare).
-- Severity: respect D021's outside-project policy (no line outside a
-  project — guard lives in the project's routed home).
-- Tests: wired-ok, missing-file warn, missing-hook warn, stale-path warn
-  (write settings with a different binary path), invalid-JSON error,
-  Executable-nil note. doctor_test.go's mkLayout writes no settings.json
-  today — decide whether healthy fixture gains one (TestDoctorAllHealthy
-  will need the new ok/warn line either way).
-- After this lands, Phase 3 is COMPLETE; next is Phase 4 (gstack installer,
-  reuse gstackRelGlobal/gstackRelProject constants from doctor.go).
+Phase 4, first item: "install gstack: clone to .agentmod/claude/skills/gstack
+only (+ fixture-repo tests)" (TASKS.md Phase 4 top unchecked). Before
+writing code:
+- Read FABLE_PLAN §16 (gstack install spec) + IMPLEMENTATION_PLAN's gstack
+  section + D025 (gstack doctor findings). The destination constant is
+  `gstackRelProject` in doctor.go (claude/skills/gstack rel to .agentmod/) —
+  REUSE it, do not respell the path; gstackRelGlobal is the global path the
+  installer must never write.
+- This is the first command that EXECUTES a foreign binary (git). Tests
+  must not need network: clone from a local fixture repo (git init + commit
+  in a temp dir — running `git` in tests is fine, it's on every dev
+  machine; guard against PATH-injection by using exec.LookPath semantics
+  consistent with injected Env, or document why real exec is used here
+  unlike statBinaryOnPath).
+- Outside-project failure, already-installed abort, --force, and
+  global-pollution verification are SEPARATE Phase 4 items — keep this
+  iteration to the happy-path clone + tests if scope grows.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

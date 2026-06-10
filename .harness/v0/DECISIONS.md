@@ -531,3 +531,34 @@ routed, so neither leak exists). Broken config = defaults (enabled, partial).
   (constants claudeAuthFile/codexAuthFile in doctor.go + layout dir names).
   The T20 exclusion engine must hardcode these; authSpec's doc comment
   marks the spot.
+
+## D029 — 2026-06-11 — doctor: Claude guard wiring finding (Phase 3 last slice)
+- **Subject + placement**: label "Claude guard", inside a project only (the
+  guard lives in the routed home's settings.json — no project, no line;
+  D021's outside-project policy). `guardFinding(agentmodDir, env)` in
+  doctor.go, read-only; init owns creation and repair (D027).
+- **Reuse, not forks** (mirrors rcfile's inspectRCBlock pattern from D021):
+  claudesettings.go grew `guardHookEntries(pre)` (the marker-bearing hook
+  maps, shared walker) and `inspectGuardHook(path, desired)` returning
+  guardHookFileAbsent/Missing/Stale/Current + the found command;
+  ensureClaudeGuardHook was rewritten on guardHookEntries — write-path
+  behavior unchanged, all T17 tests untouched.
+- **Severities**: wired with the current binary's command → ok; settings.json
+  absent → warn (re-run init); file present without a marker hook → warn;
+  marker present with a different command → warn naming BOTH the found and
+  expected commands, remedy re-run init (repairs in place, D027);
+  unparseable / wrong-typed file → error, with the writer's own hard-error
+  strings (doctor reports what init would refuse to touch). Multiple marker
+  hooks: any one matching = current (ensure never creates duplicates; a
+  hand-made duplicate still counts as wired).
+- **Unresolvable env.Executable** (nil or erroring): ok-level "hook present
+  … binary path not verified" when a marker hook exists; the file-absent /
+  hook-missing warns still fire (they need no binary). Mirrors init's
+  skip-not-fail stance on exotic os.Executable errors.
+- **Not gated on claude.enabled** (D027: init wires unconditionally —
+  routing disablement is the hook's natural off switch, so absence is a
+  finding regardless of config; broken config changes nothing here).
+- **Test fixture**: doctor_test.go's mkLayout now writes a guard-wired
+  settings.json for fakeBinPath (`writeGuardSettings` helper), matching
+  init's guarantee — same precedent as the opencode stub in D023. Layout
+  tests deleting claude/ moved from os.Remove to os.RemoveAll.

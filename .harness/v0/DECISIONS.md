@@ -412,3 +412,44 @@ routed, so neither leak exists). Broken config = defaults (enabled, partial).
   Reported regardless of claude.enabled — what sits in the project-local
   skills dir is a fact either way. Path constants `gstackRelGlobal` /
   `gstackRelProject` in doctor.go — Phase 4's installer must reuse them.
+
+## D026 — 2026-06-11 — guard claude-bash: engine, deny modes, fail-safe scope
+- **Layout**: pure engine `guard.Decide(input []byte, home string) Decision`
+  in new `internal/guard` (stdlib only); stdin/exit plumbing in
+  `internal/cli/guard.go` (`runGuard`). `Env` gained `Stdin io.Reader`
+  (osEnv = os.Stdin, fakeEnv leaves nil = empty input) — future
+  stdin-consuming commands (auth copy-on-consent prompt) must read it, never
+  os.Stdin directly.
+- **Deny modes (§3.1, both implemented)**: default = exit 2 + reason on
+  stderr ("agentmod guard: BLOCKED: …"); `--json` = exit 0 + stdout
+  `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":
+  "deny","permissionDecisionReason":…}}`. Allow is ALWAYS silent exit 0 (no
+  "allow" JSON — no opinion is the safest allow). Exit 2 here is the hook
+  protocol's number, not our exit-code table's ExitNotInProject; documented
+  as local const exitGuardDeny.
+- **Protected paths** (product scope, narrower than the dev-harness guard):
+  the four global agent homes (claude/codex dot-homes, opencode config +
+  XDG data dirs) in tilde / $HOME / ${HOME} / /Users/x / /home/x spellings
+  PLUS the literal injected HOME value (catches /srv/home1-style homes).
+  Credential dirs (.ssh etc.) stay harness-only. Boundary class after the
+  home name so a ".claudette" path never matches; home == "/" is ignored
+  (would match everything).
+- **Deny rules**: (1) sudo at command position; (2) HOME= reassignment
+  (boundary-guarded — a CODEX_HOME=/x prefix does NOT match); (3)
+  global-home reference AND (command-position write cmd cp/mv/rm/mkdir/
+  rmdir/touch/tee/ln/rsync/install/unzip/chmod/chown/truncate/dd | a git
+  clone | redirection whose TARGET is a protected home). Redirect rule is
+  target-scoped (per IMPLEMENTATION_PLAN §11), deliberately narrower than
+  the harness guard's any-home-redirect rule: reading a global file
+  redirected into the project, or redirecting to a non-agent file under
+  home, is allowed. (?m) on command-position regexes so multiline Bash
+  blocks are covered line by line.
+- **npm -g deliberately NOT blocked**: inside an agentmod project
+  NPM_CONFIG_PREFIX routes global installs into .agentmod/node — blocking
+  them would fight our own routing (the dev-harness guard blocks it only
+  because the dev repo has no routing).
+- **Fail-safe (§17)**: unparseable/tool_name-less input → deny only if the
+  raw bytes match the protected-path pattern, else allow; stdin read errors
+  ignored (decide on the partial bytes); never block everything. Non-Bash
+  tool_name → allow (the settings matcher is "Bash"; Write/Edit policing is
+  Claude's own permission system's job, and T17 wires the matcher).

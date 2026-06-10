@@ -20,15 +20,18 @@ import (
 // can substitute fakes without touching real process state. GOOS is the
 // runtime.GOOS value, injected so platform-specific findings (the macOS
 // Keychain note) are testable on any host; fakes leave it "" (treated as
-// not-darwin) unless a test sets it explicitly.
+// not-darwin) unless a test sets it explicitly. Stdin is the process stdin
+// (consumed by `guard claude-bash`); fakes leave it nil (treated as empty)
+// unless a test sets it.
 type Env struct {
 	Getwd     func() (string, error)
 	LookupEnv func(key string) (string, bool)
 	GOOS      string
+	Stdin     io.Reader
 }
 
 func osEnv() Env {
-	return Env{Getwd: os.Getwd, LookupEnv: os.LookupEnv, GOOS: runtime.GOOS}
+	return Env{Getwd: os.Getwd, LookupEnv: os.LookupEnv, GOOS: runtime.GOOS, Stdin: os.Stdin}
 }
 
 // runStatus implements `agentmod status` (FABLE_PLAN §24): a brief report of

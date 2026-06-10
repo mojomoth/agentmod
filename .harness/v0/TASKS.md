@@ -37,7 +37,7 @@ Add/split items freely; keep units small.
 - [x] doctor: per-agent home state incl. auth present / re-login needed (+ tests)
 - [x] doctor: OpenCode partial-isolation + merge-chain leak warnings (+ tests)
 - [x] doctor: macOS Keychain note; gstack global-risk check (+ tests)
-- [ ] guard claude-bash: stdin contract, deny rules, fail-safe (+ table tests)
+- [x] guard claude-bash: stdin contract, deny rules, fail-safe (+ table tests)
 - [ ] init wires guard into .agentmod/claude/settings.json (+ tests)
 - [ ] auth copy-on-consent: detect, prompt, copy/decline/non-interactive paths (+ tests)
 

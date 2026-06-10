@@ -35,6 +35,10 @@ Commands:
              hook; --shell <zsh|bash> with --activate <root> or --deactivate)
   hook       print the shell hook script for your rc file to eval
              (hook zsh | hook bash)
+  guard      PreToolUse guard for Claude Code (guard claude-bash): reads the
+             hook JSON on stdin and exits 2 with the reason on stderr to
+             block global-agent-home writes (--json emits a
+             permissionDecision instead); allowed commands exit 0 silently
   version    print version and exit
   help       show this help
 
@@ -67,6 +71,8 @@ func run(args []string, stdout, stderr io.Writer, env Env) int {
 		return runEnv(args[1:], stdout, stderr, env)
 	case "hook":
 		return runHook(args[1:], stdout, stderr)
+	case "guard":
+		return runGuard(args[1:], stdout, stderr, env)
 	case "version", "--version":
 		fmt.Fprintf(stdout, "agentmod %s\n", Version)
 		return ExitOK

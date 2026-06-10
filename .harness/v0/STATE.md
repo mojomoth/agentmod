@@ -1,13 +1,14 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 3 — doctor slice 5:
-macOS Keychain note + gstack global/project state; Env.GOOS injection)
+Last updated: 2026-06-11 (iteration: Phase 3 — guard claude-bash engine +
+CLI, T16; Env.Stdin injection)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
   both shell hooks + rc editor + env-hygiene integration tests + the
-  first-session diagnosis). Phase 3 IN PROGRESS: all five doctor slices
-  done; guard + auth copy-on-consent remain.
+  first-session diagnosis). Phase 3 IN PROGRESS: all five doctor slices +
+  guard claude-bash done; guard wiring into settings.json (T17) + auth
+  copy-on-consent remain.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -309,6 +310,29 @@ macOS Keychain note + gstack global/project state; Env.GOOS injection)
     Phase 4 installer MUST reuse them. 7 new test funcs in doctor_test.go;
     TestDoctorAllHealthy asserts the two new gstack ok lines (no Keychain
     line there — fakeEnv GOOS is "").
+- `agentmod guard claude-bash` LANDED and green (T16 ✅, D026): new
+  `internal/guard` package (pure `Decide(input, home) Decision`, stdlib
+  only) + `internal/cli/guard.go` (runGuard), wired into dispatcher +
+  usage. Read D026 before touching guard code; T17 (settings.json wiring)
+  consumes this command as-is.
+  - `Env` gained `Stdin io.Reader` (osEnv = os.Stdin; fakeEnv leaves nil =
+    empty input). Future stdin-consuming commands (auth consent prompt)
+    must read env.Stdin, never os.Stdin.
+  - Deny modes per §3.1: default exit 2 + "agentmod guard: BLOCKED: …" on
+    stderr; `--json` exit 0 + hookSpecificOutput/permissionDecision=deny
+    JSON on stdout. Allow = silent exit 0 in both modes.
+  - Rules: sudo; HOME= reassignment; and (global-home reference AND
+    write-cmd | git-clone | redirect-targeting-global). Protected: the four
+    agent homes in ~/$HOME/${HOME}//Users/x//home/x spellings + literal
+    injected HOME. Reads never blocked; redirect rule is target-scoped
+    (narrower than dev-harness guard — see D026). npm -g deliberately not
+    blocked (routing already localizes it). Fail-safe: unparseable input
+    denies only on raw global-path reference; stdin read errors decide on
+    partial bytes.
+  - Tests: guard_test.go in internal/guard (37-command table + custom-HOME
+    + non-Bash + unparseable×5) and internal/cli (exit codes, JSON shape,
+    silence on allow, nil/erroring stdin, usage errors). Binary smoke of
+    all three modes done via /tmp fixture files (see caution below).
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -341,29 +365,36 @@ mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 3 sixth item: "guard claude-bash: stdin contract, deny rules,
-fail-safe (+ table tests)" (TASKS.md Phase 3 top unchecked, T16). Before
-writing code:
-- Read FABLE_PLAN §17 (targets/behaviors/cautions) and §3.1 (the VERIFIED
-  PreToolUse stdin contract — implement against it, do not re-derive).
-- New subcommand `agentmod guard claude-bash` (§19): reads the hook JSON
-  from stdin, extracts the Bash command, denies high-write-likelihood
-  commands targeting global agent homes (~/.claude, ~/.codex,
-  ~/.config/opencode incl. skills/plugins subpaths); never blanket-blocks
-  reads. Unparseable stdin → fail SAFE: deny only global-path writes,
-  never block everything (§17). Decide deny mechanism per §3.1 contract
-  (exit 2 + stderr vs JSON permissionDecision — check what §3.1 verified).
-- HOME for target resolution from injected Env (GOOS too if any path is
-  platform-specific). Table tests per T16: rm/cp/mv/mkdir/clone/redirect
-  into global homes blocked; reads allowed; project-local writes allowed;
-  unparseable-input fail-safe; both deny modes if both exist.
-- Wiring guard into .agentmod/claude/settings.json is the NEXT task
-  (T17) — keep this one to the guard executable itself.
+Phase 3 seventh item: "init wires guard into .agentmod/claude/settings.json"
+(TASKS.md Phase 3 top unchecked, T17). Before writing code:
+- Read FABLE_PLAN §17 placement paragraph (DECIDED: hook config goes in the
+  ROUTED home's settings, `.agentmod/claude/settings.json` — never the
+  project's `.claude/settings.json`) and D026 (the command contract being
+  wired).
+- init must create/merge `.agentmod/claude/settings.json` with a PreToolUse
+  hook entry: matcher "Bash" → command invoking the guard. IMPLEMENTATION_
+  PLAN §11 says reference the ABSOLUTE agentmod binary path (re-resolved by
+  doctor if the binary moved — that doctor finding can be part of T17 or a
+  follow-up; decide and record). Binary path discovery: os.Executable()
+  equivalent must be injectable for tests (extend Env, following the
+  Getwd/LookupEnv/Stdin pattern).
+- Respect init's never-overwrite discipline (D013-era guarantees): if
+  settings.json already exists, MERGE the hook entry in (or detect
+  present-and-correct = no-op) without clobbering user keys; re-init stays
+  idempotent (T05's snapshotTree test style). Decide JSON read-modify-write
+  via stdlib encoding/json.
+- Tests: fresh init writes the hook; re-init no-op; existing settings.json
+  with user keys preserved; hook command points at the resolved binary;
+  project `.claude/settings.json` NEVER touched.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME
   even inside the repo — use the Write/Edit tools for project files instead
-  of `cat >>`.
+  of `cat >>`. It also blocks heredocs/echo whose CONTENT merely mentions
+  global agent paths alongside write-words or `git clone` (bit this
+  iteration twice: a printf smoke fixture and a DECISIONS.md heredoc).
+  Write fixture JSON to /tmp files with the Write tool and pipe those;
+  append to harness docs with Edit, not `cat <<EOF`.
 - Do not reinstall mattpocock skills; verify via `skills-lock.json` only.
 - `.agentmod/` is gitignored — never commit it.
 - Tests must inject fake homes via parameters/env vars consumed by OUR code —

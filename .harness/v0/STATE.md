@@ -1,9 +1,9 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-10 (iteration: Phase 2 task 2 — init `.gitignore` handling, T07)
+Last updated: 2026-06-10 (iteration: Phase 2 task 3 — init idempotency holistic test, T05)
 
 ## Where things stand
-- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 items 1–2 LANDED.
+- Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 items 1–3 LANDED.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -60,6 +60,17 @@ Last updated: 2026-06-10 (iteration: Phase 2 task 2 — init `.gitignore` handli
   skip/non-git-existing-file extend/ancestor repo/worktree `.git` file/
   second-run no-op/dir error). Second-run no-op already covers the
   .gitignore slice of T05.
+- init idempotency LANDED and green (T05 ✅): `TestInitSecondRunIsNoOp` in
+  init_test.go + `snapshotTree` helper (WalkDir → map of dir-set + full file
+  bytes under cwd, incl. .agentmod and .gitignore). Runs init twice in a fake
+  git repo (a bare `.git` dir satisfies insideGitRepo — no git exec),
+  asserts run 2 changes/creates/removes NOTHING and its stdout reports
+  all-already-present ("already initialized", "all directories already
+  present", "already covers .agentmod/", 2× "already present, left
+  untouched"). NO product-code change was needed — re-init was already a
+  true no-op. Decision: T05 ticked ✅; its "no dup rc block" slice is folded
+  into T08's matrix row (rc editor doesn't exist yet; T08 already lists
+  rc-block idempotency).
 - `gofmt -l` clean, `go vet` clean, `go test ./...` PASSES (all packages).
 
 ## Toolchain baseline (verified on this machine, 2026-06-10)
@@ -82,19 +93,25 @@ NOT a violation; only new entries/mtime changes caused by our work are.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 2, third item: init idempotency guarantee tests (TEST_MATRIX T05).
-Much is already covered piecemeal (re-init no-clobber in init_test.go,
-.gitignore second-run no-op in gitignore_test.go); T05 wants one holistic
-test: run init twice in a git repo, snapshot the FULL tree state (every
-file's bytes + the dir set under cwd and .agentmod) after run 1 and assert
-run 2 changes nothing and its stdout reports all-already-present
-("already initialized", "left untouched" ×2, "already covers"). The
-"no dup rc block" slice of T05 cannot be tested until the rc editor (T08)
-exists — mark T05 🟡 with a note, or tick it and fold the rc slice into
-T08's row (decide; rc-block idempotency is listed in T08 anyway).
-Implementation should need NO product-code changes — if run 2 mutates
-anything, that's a bug to fix this iteration. Then move to init flags
-(--no-shell-hook, --yes) per TASKS.md.
+Phase 2, fourth item: init flags `--no-shell-hook` and `--yes` /
+`--non-interactive` (TEST_MATRIX T06, FABLE_PLAN §12 lines ~389-390).
+Current init REJECTS all args ("init takes no arguments yet" in
+init.go runInit) — replace that with a small flag parser (stdlib only,
+unknown flags still error citing the flag). Semantics to implement NOW:
+flags are accepted, recorded, and validated; `--no-shell-hook` must skip
+rc-file modification and `--yes` must never prompt / never copy auth —
+but rc editing (T08) and auth bootstrap (Phase 3) don't exist yet, so
+the honest current behavior is: flags parse, are reflected in init
+output (e.g. "Shell hook: skipped (--no-shell-hook)" vs a
+not-yet-implemented placeholder line), and tests lock in: both flags
+accepted singly/together, unknown flag still ExitError naming it,
+`--yes` produces zero prompts (init currently never prompts — assert
+no reads from stdin by passing no stdin), behavior identical otherwise
+(reuse snapshotTree to show flagged init builds the same tree). Thread
+the parsed options through runInit's signature (struct, not bools) so
+T08 can consume them. Keep TestInitRejectsArguments but update it to a
+genuinely-unknown flag. Then move to `agentmod hook zsh` + `agentmod
+env` per TASKS.md.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

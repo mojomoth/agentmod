@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -165,6 +166,85 @@ func TestInitAtExistingRootDoesNotWarnNested(t *testing.T) {
 		t.Errorf("re-init at root warned about nesting:\n%s", stdout)
 	}
 	wantContains(t, "stdout", stdout, "already initialized")
+}
+
+// snapshotTree records every entry under root: directories by presence,
+// files by their full contents. Two equal snapshots mean the tree is
+// byte-identical with the same directory set.
+func snapshotTree(t *testing.T, root string) map[string]string {
+	t.Helper()
+	snap := make(map[string]string)
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			snap[rel] = "dir"
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		snap[rel] = "file:" + string(data)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snap
+}
+
+func TestInitSecondRunIsNoOp(t *testing.T) {
+	root := t.TempDir()
+	// A .git directory makes root a git repository for ensureGitignore, so
+	// the first run exercises every init effect, .gitignore creation included.
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _, stderr := runInitForTest(t, root)
+	if code != ExitOK {
+		t.Fatalf("first init: exit = %d, want %d; stderr:\n%s", code, ExitOK, stderr)
+	}
+	before := snapshotTree(t, root)
+
+	code, stdout, stderr := runInitForTest(t, root)
+	if code != ExitOK {
+		t.Fatalf("second init: exit = %d, want %d; stderr:\n%s", code, ExitOK, stderr)
+	}
+	if stderr != "" {
+		t.Errorf("second init stderr = %q, want empty", stderr)
+	}
+
+	after := snapshotTree(t, root)
+	for rel, want := range before {
+		got, ok := after[rel]
+		if !ok {
+			t.Errorf("second init removed %s", rel)
+		} else if got != want {
+			t.Errorf("second init changed %s:\ngot:  %q\nwant: %q", rel, got, want)
+		}
+	}
+	for rel := range after {
+		if _, ok := before[rel]; !ok {
+			t.Errorf("second init created %s", rel)
+		}
+	}
+
+	// The report must say every part was already in place.
+	wantContains(t, "stdout", stdout,
+		"already initialized",
+		"all directories already present",
+		"already covers .agentmod/",
+	)
+	if got := strings.Count(stdout, "already present, left untouched"); got != 2 {
+		t.Errorf("want 2 'left untouched' lines (agentmod.toml, opencode.json), got %d:\n%s", got, stdout)
+	}
 }
 
 func TestInitRejectsArguments(t *testing.T) {

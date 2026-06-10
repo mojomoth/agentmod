@@ -10,10 +10,10 @@ only when its rows are all ✅ in the Status column. Update Status as tests land
 | T02 | Config | defaults match FABLE_PLAN §13 (change_home=false, guards on, exclusions on, XDG opt-in off); unknown schema version rejected; round-trip | ✅ |
 | T03 | status | active output (roots+homes); inactive output | ✅ |
 | T04 | init layout | creates .agentmod tree (claude/codex/opencode/node/snapshots); never deletes/overwrites existing dirs | ✅ |
-| T05 | init idempotency | second run = no-op; no dup rc block; no dup .gitignore line; existing config untouched | ⬜ |
+| T05 | init idempotency | second run = no-op (full-tree snapshot); no dup .gitignore line; existing config untouched. Rc-block slice folded into T08 (rc editor doesn't exist yet) | ✅ |
 | T06 | init flags | --no-shell-hook skips rc edits; non-interactive never prompts, never copies auth | ⬜ |
 | T07 | .gitignore | created if missing; entry deduped; non-git dir handled gracefully | ✅ |
-| T08 | rc fencing | block inserted once; updated in place; user content byte-preserved around it | ⬜ |
+| T08 | rc fencing | block inserted once; no dup block on re-init (T05 slice); updated in place; user content byte-preserved around it | ⬜ |
 | T09 | zsh hook | scripted zsh: cd in → vars set; cd out → vars unset; new shell inside project activates (precmd); nested project nearest-wins | ⬜ |
 | T10 | bash hook | same via PROMPT_COMMAND | ⬜ |
 | T11 | env hygiene | no duplicate PATH entries after repeated transitions; prior user env values restored; HOME never changed; no shims created anywhere | ⬜ |

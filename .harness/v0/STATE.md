@@ -1,9 +1,9 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-10 (iteration: Phase 1 task 2 — internal/project)
+Last updated: 2026-06-10 (iteration: Phase 1 task 3 — internal/config)
 
 ## Where things stand
-- Phase 0 (harness) COMPLETE. Phase 1 in progress (2 of 4 items done).
+- Phase 0 (harness) COMPLETE. Phase 1 in progress (3 of 4 items done).
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26, zero deps — toml deferred per
   D009), thin `main.go`, `internal/cli` dispatcher with `--version`/
@@ -15,6 +15,13 @@ Last updated: 2026-06-10 (iteration: Phase 1 task 2 — internal/project)
   lexical (no symlink resolution), marker must be a regular file (D011).
   Exposes `Project{Root, AgentmodDir, ConfigPath}`, `ErrNotFound`,
   `DirName`/`ConfigFileName` constants. 7 tests, all temp-dir based.
+- `internal/config` LANDED and green (T02 ✅): schema v1 per
+  IMPLEMENTATION_PLAN §6, `Default()`/`Parse()`/`Load()`/`Validate()`/
+  `Marshal()`. Overlay-on-defaults loading, unknown keys rejected, hard
+  rejects for change_home/schema_version/mode/include_sessions (D012).
+  `github.com/BurntSushi/toml v1.6.0` added to go.mod (D004/D009 fulfilled —
+  this remains the ONLY dependency). 13 test funcs incl. §13 defaults pin,
+  partial-override, round-trip, Load error paths.
   `gofmt -l` clean, `go vet` clean, `go test ./...` PASSES.
 
 ## Toolchain baseline (verified on this machine, 2026-06-10)
@@ -36,12 +43,15 @@ NOT a violation; only new entries/mtime changes caused by our work are.
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 1, next unchecked TASKS.md item: `internal/config` — TOML schema for
-agentmod.toml, defaults per FABLE_PLAN §13, validation (change_home must be
-false; unknown schema_version rejected) + tests (TEST_MATRIX T02, including
-round-trip). This is the iteration that adds `github.com/BurntSushi/toml`
-to go.mod (D004/D009). `internal/project.Discover` provides ConfigPath to
-load from.
+Phase 1, last unchecked item: `agentmod status` — active/inactive output
+(TEST_MATRIX T03; spec FABLE_PLAN §24). Wire a `status` subcommand into
+`internal/cli`: use `project.Discover(cwd)` + `config.Load(ConfigPath)`;
+inactive → say so (exit 0 per §24 — re-check §24 wording before assuming);
+active → print project root, `.agentmod` root, per-agent homes derived from
+config (claude/codex/opencode/node enabled flags). Keep env-var *truth*
+reporting minimal until the shell hook exists — status can only report what
+WOULD be routed plus whether AGENTMOD_ACTIVE is actually set. Inject cwd,
+env lookup, and stdout for tests (no real installs needed).
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME
@@ -52,4 +62,5 @@ load from.
 - Tests must inject fake homes via parameters/env vars consumed by OUR code —
   never reassign the real `HOME` for the parent process, never touch real
   global agent homes (guard blocks it).
-- Add `github.com/BurntSushi/toml` only when `internal/config` lands (D009).
+- BurntSushi/toml is now IN go.mod — it stays the only dependency (D004).
+- `config.Load` errors already name the file; don't re-wrap with the path.

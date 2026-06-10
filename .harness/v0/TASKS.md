@@ -16,7 +16,7 @@ Add/split items freely; keep units small.
 ## Phase 1 — Skeleton
 - [x] go.mod + main.go + subcommand dispatcher + `--version`
 - [x] internal/project: upward discovery of .agentmod/agentmod.toml (+ tests)
-- [ ] internal/config: TOML schema, defaults per FABLE_PLAN §13, validation (+ tests)
+- [x] internal/config: TOML schema, defaults per FABLE_PLAN §13, validation (+ tests)
 - [ ] `agentmod status` active/inactive output (+ tests)
 
 ## Phase 2 — init + hooks

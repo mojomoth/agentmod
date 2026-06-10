@@ -80,3 +80,18 @@ is valid only when `.agentmod/agentmod.toml` is a regular file — a bare
 `.agentmod/` directory or a directory named `agentmod.toml` does not
 activate. Stat errors on ancestors (e.g. permissions) are treated as
 "no project here" and the walk continues, rather than failing discovery.
+
+## D012 — 2026-06-10 — Config load/validation semantics (internal/config)
+Loading overlays the TOML document onto `Default()` (BurntSushi toml leaves
+absent keys untouched), so a partial file keeps every §13 default — including
+an absent `schema_version`, which is treated as current. Unknown keys are
+REJECTED via `MetaData.Undecoded()`: within a schema version they can only be
+typos, and a misspelled policy key silently reverting to a default is worse
+than an error (cross-version compat is handled by schema_version itself).
+Validation hard-rejects: `schema_version != 1`, `mode != "standard"`,
+`isolation.change_home = true`, and `handoff.git.include_sessions = true`
+(MVP has no encryption; error explains this, per IMPLEMENTATION_PLAN §6).
+`snapshot.exclude_source`/`exclude_secrets` are *defaults*, not validated
+hard-true: the Phase 5 exclusion engine enforces protected (secret/auth)
+entries as never-removable regardless of config — documented on the struct.
+Sentinels: `ErrSchemaVersion`, `ErrChangeHome`, `ErrSessionsNeedEncryption`.

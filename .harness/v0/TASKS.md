@@ -69,7 +69,11 @@ Add/split items freely; keep units small.
       (D037: docs.go renderers; root members between REDACTION.md and
        checksums.txt; canonical re-login remedies moved to internal/handoff,
        doctor/auth alias them; T19 flips ✅)
-- [ ] git state metadata w/ sanitized remote URL, dirty warning (+ tests)
+- [x] git state metadata w/ sanitized remote URL, dirty warning (+ tests)
+      (D039: cli collects via exec git — internal/handoff stays exec-free;
+       manifest `git` key omitted when no repo/binary; userinfo stripped
+       from scheme:// remotes; dirty → refusal unless --allow-dirty;
+       source_included always-false but explicit; T22 flips ✅)
 - [ ] inspect / verify / list / pack alias (+ tests)
 
 ## Phase 6 — restore

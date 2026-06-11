@@ -44,12 +44,13 @@ Commands:
               --force replaces an existing project-local install;
               the global ~/.claude/skills is never touched)
   handoff    snapshot this project's agent environment
-             (handoff create [--output PATH] [--allow-findings] packs
-              .agentmod/ into a .amod zip with manifest, inventory, a
-              REDACTION.md report, and sha256 checksums; kept files are
-              scanned for secret candidates and private-key material
-              refuses creation unless --allow-findings; default output is
-              .agentmod/snapshots/<project>-<timestamp>.amod;
+             (handoff create [--output PATH] [--allow-findings]
+              [--allow-dirty] packs .agentmod/ into a .amod zip with
+              manifest, inventory, a REDACTION.md report, and sha256
+              checksums; kept files are scanned for secret candidates and
+              private-key material refuses creation unless --allow-findings;
+              a dirty git worktree refuses unless --allow-dirty; default
+              output is .agentmod/snapshots/<project>-<timestamp>.amod;
               restore/inspect/verify/list are not implemented yet)
   version    print version and exit
   help       show this help

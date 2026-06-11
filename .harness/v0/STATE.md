@@ -1,7 +1,7 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 5 slice 4 — HANDOFF.md +
-RESTORE.md docs members, D037)
+Last updated: 2026-06-11 (iteration: Phase 5 slice 5 — git state metadata
++ --allow-dirty gate, D039)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
@@ -12,7 +12,8 @@ RESTORE.md docs members, D037)
   distinct error reporting; T18 ✅). Phase 5 IN PROGRESS: slice 1 (.amod
   writer) + slice 2 (default exclusion engine, T20 ✅) + slice 3 (secret
   scan + REDACTION.md, T21 ✅) + slice 4 (HANDOFF.md + RESTORE.md docs,
-  D037; T19 now ✅) landed; next is git state metadata (T22).
+  D037; T19 ✅) + slice 5 (git state metadata + --allow-dirty, D039;
+  T22 ✅) landed; next is inspect/verify/list + pack alias.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -628,6 +629,34 @@ RESTORE.md docs members, D037)
     the two names; checksums + determinism tests auto-extended. Binary
     smoke in /tmp passed: init → create → unzip -p both docs correct →
     `shasum -a 256 -c` all OK incl. both new members.
+- git state metadata + --allow-dirty gate LANDED and green (Phase 5
+  slice 5 ✅, D039, T22 ✅): new `internal/cli/gitstate.go`
+  (collectGitState/gitOutput/summarizeStatus/redactRemoteURL/gitIdentity);
+  Manifest gained `Git *GitState` (omitempty — nil ⇒ key ABSENT, D034
+  tolerate-absence; GitState carries branch/head/dirty/status_summary/
+  remote_url/source_included). Run 2's orphaned working-tree struct edit
+  was finished by this iteration. Read D030+D034+D039 before touching
+  git-metadata code.
+  - Split: internal/handoff stays exec-free (CreateOptions.Git is plain
+    data); the cli EXECUTES git (D030 exception, real LookPath + real env
+    + GIT_TERMINAL_PROMPT=0 + GIT_OPTIONAL_LOCKS=0 so status never
+    refreshes the index). Binary absent / not a repo → `git: metadata
+    omitted (<note>)` on stdout + no manifest key, never a failure.
+  - Dirty (untracked counts; `-c status.showUntrackedFiles=normal` defeats
+    user display config) + no `--allow-dirty` → stderr refusal naming the
+    summary + flag, exit 1, NOTHING written (gate sits before Create).
+    With the flag stdout marks `DIRTY (…) — packed anyway (--allow-dirty)`.
+  - Redaction: scheme:// remotes lose the ENTIRE userinfo (user:token,
+    token-only, and ssh:// git@ alike — manifest documents WHERE, not a
+    dialable URL); scp-like git@host:path unchanged; port preserved.
+    source_included is always false in MVP but explicitly spelled out.
+  - Tests: 7 funcs in new gitstate_test.go (tables for redact ×8 +
+    porcelain ×7; PATH-masked git-missing; non-repo; clean+remote;
+    dirty+detached; unborn branch) + 3 in handoff_test.go (omitted note,
+    refuse-then-allow, clean manifest) + readSnapshotManifest helper +
+    TestCreateManifestGitState (internal/handoff). cli usage text grew
+    --allow-dirty. Binary smoke in /tmp passed (all four shapes incl.
+    manifest JSON via unzip -p).
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -657,34 +686,29 @@ mtime to keep moving; audit by looking for agentmod-created entries, not by
 mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
 (2026-06-11: same pattern again — `~/.codex` mtime now 6월 11 01:11, the
 other two homes and the skills list unchanged; no agentmod artifacts.
-Later same day: `~/.codex` mtime 6월 11 02:28, same verdict.)
+Later same day: `~/.codex` mtime 6월 11 02:28, same verdict. And again
+16:44 — skills list + other two homes still match baseline.)
 
 ## Failing tests
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 5, fifth item: "git state metadata w/ sanitized remote URL, dirty
-warning (+ tests)" (T22). Re-read IMPLEMENTATION_PLAN §12+§13 + FABLE_PLAN
-§18 + D030 + D034 before coding. Notes:
-- Manifest EXTENDS with git fields (D034 contract: restore must tolerate
-  their absence — keep them omitempty / a nullable sub-struct). T22 row
-  wants: repo present?, branch, HEAD, dirty flag, status summary;
-  remote URL with credential tokens REDACTED (https://user:token@host →
-  strip the userinfo, keep host/path; test ssh + https + token forms).
-- Dirty worktree → warn, and per §13/T22 creation needs explicit consent
-  (--allow-dirty flag, same shape as --allow-findings). Decide whether
-  the no-git-repo case is silent or a manifest "git": null — record in
-  DECISIONS.
-- Collecting git state requires EXECUTING git (like install, unlike
-  doctor — D030 precedent). Use exec git with GIT_CONFIG_GLOBAL/SYSTEM
-  considerations only in TESTS (runGitFixture/makeGstackFixtureRepo in
-  install_test.go are the reusable helpers). Binary absent → metadata
-  omitted + a note, never a hard failure (handoff must work in non-git
-  projects).
-- CreateOptions likely grows the project git info or a collector hook —
-  prefer collecting in internal/cli (which has Env) and passing plain
-  data into handoff.Create, keeping internal/handoff exec-free and
-  deterministic under test.
+Phase 5, final item: "inspect / verify / list / pack alias (+ tests)".
+Re-read FABLE_PLAN §18 ("Handoff inspect / verify / list") + §21 +
+IMPLEMENTATION_PLAN §12 + D034 before coding. Notes:
+- The three subcommands currently answer "not implemented yet" (exit 1)
+  in runHandoff — replace those stubs. `pack` is an ALIAS for create
+  (FABLE_PLAN §11 Alias section; check exact alias semantics there —
+  unpack is restore's alias and stays a stub until Phase 6).
+- inspect: print manifest (incl. git state when present), member/payload
+  counts, excluded/redaction summary WITHOUT extracting to disk; verify:
+  re-hash every content-bearing member against checksums.txt + inventory
+  (zip read only, no writes); list: snapshots in .agentmod/snapshots/
+  (status.go's "Recent handoff" mtime probe is related — reuse/extract).
+- Reuse readSnapshotManifest (cli handoff_test.go) shape for production
+  reading; consider moving zip-reading helpers into internal/handoff
+  (Open/Inspect functions) so restore (Phase 6) builds on them.
+- Slice it if large: inspect+list first, verify second.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

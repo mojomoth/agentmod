@@ -266,6 +266,119 @@ func TestHandoffArgumentValidation(t *testing.T) {
 	}
 }
 
+// readSnapshotManifest unmarshals manifest.json out of the snapshot at path.
+func readSnapshotManifest(t *testing.T, path string) handoff.Manifest {
+	t.Helper()
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatalf("snapshot is not a valid zip: %v", err)
+	}
+	defer zr.Close()
+	var m handoff.Manifest
+	for _, f := range zr.File {
+		if f.Name != handoff.ManifestName {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.NewDecoder(rc).Decode(&m); err != nil {
+			t.Fatal(err)
+		}
+		rc.Close()
+		return m
+	}
+	t.Fatalf("snapshot %s has no %s", path, handoff.ManifestName)
+	return m
+}
+
+func TestHandoffCreateOutsideGitRepoOmitsMetadata(t *testing.T) {
+	requireGit(t) // without git the note differs ("git binary not found")
+	root := makeProject(t, config.Default())
+	output := filepath.Join(t.TempDir(), "snap.amod")
+	code, stdout, stderr := runHandoffForTest(t, fakeEnv(root, nil), "create", "--output", output)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	wantContains(t, "stdout", stdout, "git: metadata omitted (not a git repository)")
+	if m := readSnapshotManifest(t, output); m.Git != nil {
+		t.Errorf("manifest git = %+v, want nil outside a repository", m.Git)
+	}
+}
+
+func TestHandoffCreateDirtyRepoRefusedThenAllowed(t *testing.T) {
+	// §20: a dirty worktree refuses creation until the user explicitly
+	// consents, because uncommitted source changes do not travel in a
+	// snapshot. makeProject's .agentmod/ is untracked in the fresh repo, so
+	// the tree is dirty without further setup (and the branch is unborn).
+	requireGit(t)
+	root := makeProject(t, config.Default())
+	runGitFixture(t, root, "init", "--quiet", "-b", "main")
+	output := filepath.Join(t.TempDir(), "snap.amod")
+
+	code, stdout, stderr := runHandoffForTest(t, fakeEnv(root, nil), "create", "--output", output)
+	if code != ExitError {
+		t.Fatalf("exit = %d, want %d\nstdout: %s", code, ExitError, stdout)
+	}
+	wantContains(t, "stderr", stderr,
+		"the git worktree is dirty (1 untracked)",
+		"--allow-dirty",
+	)
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("refused create left an output file (stat err = %v)", err)
+	}
+
+	code, stdout, stderr = runHandoffForTest(t, fakeEnv(root, nil), "create", "--output", output, "--allow-dirty")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	wantContains(t, "stdout", stdout,
+		"git: branch main @ (no commits yet), DIRTY (1 untracked) — packed anyway (--allow-dirty)",
+	)
+	m := readSnapshotManifest(t, output)
+	if m.Git == nil {
+		t.Fatal("manifest git missing")
+	}
+	if !m.Git.Dirty || m.Git.StatusSummary != "1 untracked" {
+		t.Errorf("manifest git = %+v, want dirty with '1 untracked'", m.Git)
+	}
+	if m.Git.Branch != "main" || m.Git.Head != "" {
+		t.Errorf("manifest git = %+v, want branch main on an unborn HEAD", m.Git)
+	}
+	if m.Git.SourceIncluded {
+		t.Error("manifest git source_included = true; no code path can include source yet")
+	}
+}
+
+func TestHandoffCreateCleanRepoRecordsGitState(t *testing.T) {
+	requireGit(t)
+	root := makeProject(t, config.Default())
+	runGitFixture(t, root, "init", "--quiet", "-b", "main")
+	// Committing everything (including .agentmod/) makes the tree clean, so
+	// no consent flag is needed and the stdout line reports clean.
+	runGitFixture(t, root, "add", "-A")
+	runGitFixture(t, root, "commit", "--quiet", "-m", "fixture")
+	runGitFixture(t, root, "remote", "add", "origin", "https://user:sk-FAKE-fixture@example.com/org/repo.git")
+	output := filepath.Join(t.TempDir(), "snap.amod")
+
+	code, stdout, stderr := runHandoffForTest(t, fakeEnv(root, nil), "create", "--output", output)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	wantContains(t, "stdout", stdout, "git: branch main @ ", ", clean")
+	m := readSnapshotManifest(t, output)
+	if m.Git == nil {
+		t.Fatal("manifest git missing")
+	}
+	if m.Git.Dirty || m.Git.StatusSummary != "clean" || m.Git.Branch != "main" || m.Git.Head == "" {
+		t.Errorf("manifest git = %+v, want clean main with a commit hash", m.Git)
+	}
+	if m.Git.RemoteURL != "https://example.com/org/repo.git" {
+		t.Errorf("manifest remote = %q, want credentials stripped", m.Git.RemoteURL)
+	}
+}
+
 func TestHandoffCreateRealClockWhenNowNil(t *testing.T) {
 	// osEnv always sets Now, but the field is optional by contract: a nil
 	// Now falls back to the real clock instead of panicking.

@@ -426,3 +426,51 @@ func mkfifo(path string) error {
 	}
 	return nil
 }
+
+func TestCreateManifestGitState(t *testing.T) {
+	root := mkFixtureProject(t)
+
+	// nil Git → the key is absent from manifest.json entirely (not null),
+	// the D034 restore-must-tolerate-absence contract.
+	noGit := filepath.Join(t.TempDir(), "nogit.amod")
+	createForTest(t, root, noGit)
+	raw := readMember(t, openSnapshot(t, noGit), ManifestName)
+	if strings.Contains(string(raw), `"git"`) {
+		t.Errorf("manifest with nil Git still contains a git key:\n%s", raw)
+	}
+
+	st := &GitState{
+		Branch:        "main",
+		Head:          "0123456789abcdef0123456789abcdef01234567",
+		Dirty:         true,
+		StatusSummary: "1 staged, 2 untracked",
+		RemoteURL:     "https://example.com/org/repo.git",
+	}
+	withGit := filepath.Join(t.TempDir(), "git.amod")
+	if _, err := Create(CreateOptions{
+		ProjectRoot: root,
+		OutputPath:  withGit,
+		CreatedAt:   testNow,
+		Version:     "test-version",
+		Platform:    "testos/testarch",
+		Git:         st,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw = readMember(t, openSnapshot(t, withGit), ManifestName)
+	var m Manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("manifest.json: %v", err)
+	}
+	if m.Git == nil {
+		t.Fatalf("manifest git key missing:\n%s", raw)
+	}
+	if *m.Git != *st {
+		t.Errorf("manifest git = %+v, want %+v", *m.Git, *st)
+	}
+	// source_included must be spelled out even while always false, so a
+	// manifest reader never has to guess (FABLE_PLAN §20).
+	if !strings.Contains(string(raw), `"source_included": false`) {
+		t.Errorf("manifest git state lacks an explicit source_included field:\n%s", raw)
+	}
+}

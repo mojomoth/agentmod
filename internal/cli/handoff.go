@@ -33,12 +33,13 @@ func runHandoff(args []string, stdout, stderr io.Writer, env Env) int {
 }
 
 // runHandoffCreate implements `agentmod handoff create [--output PATH]
-// [--allow-findings]`: pack this project's .agentmod/ into a .amod
-// snapshot (handoff.Create). The default output is
+// [--allow-findings] [--allow-dirty]`: pack this project's .agentmod/ into
+// a .amod snapshot (handoff.Create). The default output is
 // .agentmod/snapshots/<project>-<timestamp>.amod.
 func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 	output := ""
 	allowFindings := false
+	allowDirty := false
 	for i := 0; i < len(args); i++ {
 		switch {
 		case args[i] == "--output":
@@ -50,8 +51,10 @@ func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 			output = args[i]
 		case args[i] == "--allow-findings":
 			allowFindings = true
+		case args[i] == "--allow-dirty":
+			allowDirty = true
 		default:
-			fmt.Fprintf(stderr, "agentmod: handoff create: unsupported argument %q (supported: --output PATH, --allow-findings)\n", args[i])
+			fmt.Fprintf(stderr, "agentmod: handoff create: unsupported argument %q (supported: --output PATH, --allow-findings, --allow-dirty)\n", args[i])
 			return ExitError
 		}
 	}
@@ -68,6 +71,15 @@ func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "agentmod: %v\n", err)
+		return ExitError
+	}
+
+	// §20 dirty-worktree gate: a snapshot carries the agent environment,
+	// not source changes, so a handoff cut from a dirty tree silently loses
+	// work unless the user explicitly accepts that.
+	gitState, gitNote := collectGitState(proj.Root)
+	if gitState != nil && gitState.Dirty && !allowDirty {
+		fmt.Fprintf(stderr, "agentmod: handoff create: refusing to pack: the git worktree is dirty (%s); uncommitted source changes do not travel in a snapshot — commit or stash them so the handoff matches a commit, or re-run with --allow-dirty to pack anyway\n", gitState.StatusSummary)
 		return ExitError
 	}
 
@@ -91,6 +103,7 @@ func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 		Version:       Version,
 		Platform:      goos + "/" + runtime.GOARCH,
 		AllowFindings: allowFindings,
+		Git:           gitState,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "agentmod: %v\n", err)
@@ -98,6 +111,14 @@ func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 	}
 	fmt.Fprintf(stdout, "Created handoff snapshot: %s\n", res.OutputPath)
 	fmt.Fprintf(stdout, "  payload: %d files, %d bytes (manifest, inventory, and checksums included)\n", res.PayloadFiles, res.PayloadBytes)
+	switch {
+	case gitState == nil:
+		fmt.Fprintf(stdout, "  git: metadata omitted (%s)\n", gitNote)
+	case gitState.Dirty:
+		fmt.Fprintf(stdout, "  git: %s, DIRTY (%s) — packed anyway (--allow-dirty); uncommitted source changes do not travel in a snapshot\n", gitIdentity(gitState), gitState.StatusSummary)
+	default:
+		fmt.Fprintf(stdout, "  git: %s, clean\n", gitIdentity(gitState))
+	}
 	switch n := len(res.Excluded); n {
 	case 0:
 		fmt.Fprintf(stdout, "  excluded by default policy: nothing\n")

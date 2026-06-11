@@ -913,3 +913,48 @@ mid-iteration leaving a PARTIAL but green edit to internal/handoff
 (git-metadata slice start; builds, all tests pass) — left in the working
 tree for the next iteration to finish. Run 3: AGENTMOD_LOOP_MAX_ITERS=30
 (~15 tasks remain).
+
+## D039 — 2026-06-11 — T22: git state metadata + --allow-dirty gate
+
+`internal/cli/gitstate.go` (collectGitState/summarizeStatus/redactRemoteURL/
+gitIdentity) + manifest `git` key. Read D030+D034+this before touching
+git-metadata code. Run 2 left the GitState struct in the working tree;
+this iteration finished and tested it.
+
+- **Split of responsibilities**: internal/handoff stays exec-free —
+  `CreateOptions.Git *GitState` is plain data rendered into manifest.json
+  (`omitempty`: nil ⇒ key absent, the D034 tolerate-absence contract;
+  asserted absent-not-null in tests). The cli EXECUTES git (D030 exception,
+  like install): real `exec.LookPath`, real environment, plus
+  GIT_TERMINAL_PROMPT=0 and GIT_OPTIONAL_LOCKS=0 so every probe is
+  non-interactive and read-only (status must not refresh the index).
+- **Unavailable ⇒ note, never failure**: git binary absent → "git binary
+  not found on PATH"; not a work tree → "not a git repository". Both print
+  as `git: metadata omitted (<note>)` and omit the manifest key — handoff
+  must work in non-git projects (§20). A repo ABOVE the project root counts
+  as the project's repo (rev-parse --is-inside-work-tree semantics).
+- **Fields** (§20): branch (empty = detached; symbolic-ref --short -q),
+  head (empty = unborn branch; rev-parse --verify -q), dirty +
+  status_summary ("clean" or "N staged, N modified, N untracked" — parsed
+  from `status --porcelain` with `-c status.showUntrackedFiles=normal` so
+  user display config cannot hide dirt; untracked counts as dirty;
+  a conflicted UU entry counts as both staged and modified), remote_url
+  (origin only; absent remote = omitted), and source_included — ALWAYS
+  false in MVP but spelled out explicitly so manifest readers never guess.
+- **Redaction**: in `scheme://` URLs the ENTIRE userinfo is stripped
+  (https://user:token@h, https://token@h, and ssh://git@h all lose it —
+  conservative: token-as-username is a real GitHub form, and the manifest
+  value documents WHERE the remote is, it is not meant to be dialed
+  verbatim). scp-like `git@host:path` has no credential slot → unchanged.
+  Port preserved (authority scan up to first `/`, last `@` within it).
+- **Dirty consent gate** lives in the CLI before handoff.Create (same shape
+  as --allow-findings): dirty + no `--allow-dirty` → stderr refusal naming
+  the summary and the flag, exit 1, NO file written. With the flag, stdout
+  marks the line `DIRTY (…) — packed anyway (--allow-dirty)`.
+- **Tests**: gitstate_test.go (redact table ×8, porcelain table ×7, missing
+  git via PATH mask, non-repo, clean repo w/ credentialed remote, dirty+
+  detached, unborn branch — fixtures via runGitFixture with `init -b main`)
+  + 3 cli handoff funcs (omitted-note + nil manifest key, refuse-then-allow
+  on unborn dirty repo, clean repo manifest w/ redacted remote) +
+  TestCreateManifestGitState in internal/handoff. Binary smoke in /tmp:
+  all four shapes verified incl. manifest JSON.

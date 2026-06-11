@@ -39,14 +39,36 @@ const (
 	PayloadPrefix = "payload/"
 )
 
-// Manifest is manifest.json. Later slices extend it (git state metadata,
-// policy flags); restore must tolerate the absence of those future fields
-// in schema-version-1 snapshots.
+// Manifest is manifest.json. Later slices extend it (policy flags);
+// restore must tolerate the absence of optional fields in
+// schema-version-1 snapshots.
 type Manifest struct {
 	SchemaVersion   int    `json:"schema_version"`
 	CreatedAt       string `json:"created_at"` // RFC3339, UTC
 	AgentmodVersion string `json:"agentmod_version"`
 	Platform        string `json:"platform"` // "<GOOS>/<GOARCH>"
+	// Git is nil — and the key absent from manifest.json — when the project
+	// is not inside a git repository or no git binary was available at
+	// create time. Restore must tolerate its absence.
+	Git *GitState `json:"git,omitempty"`
+}
+
+// GitState is the manifest's record of the project's git repository at
+// create time. The CALLER collects it (the cli executes git, D030
+// precedent); this package stays exec-free so snapshot writing is
+// deterministic under test. Restore compares these fields against the
+// target machine's repository (FABLE_PLAN §18).
+type GitState struct {
+	Branch        string `json:"branch,omitempty"` // empty when HEAD is detached
+	Head          string `json:"head,omitempty"`   // commit hash; empty on an unborn branch
+	Dirty         bool   `json:"dirty"`
+	StatusSummary string `json:"status_summary"`       // "clean" or counts, e.g. "1 staged, 2 untracked"
+	RemoteURL     string `json:"remote_url,omitempty"` // origin URL with credentials redacted
+	// SourceIncluded records whether project source code traveled in the
+	// snapshot (FABLE_PLAN §20). Always false in this version — patch
+	// inclusion is a future explicit option; the field exists so a reader
+	// of an old manifest never has to guess.
+	SourceIncluded bool `json:"source_included"`
 }
 
 // InventoryEntry describes one non-directory payload member.
@@ -80,6 +102,13 @@ type CreateOptions struct {
 	// HARD finding (private-key material in a kept file). Warn-level
 	// findings never block; both kinds are listed in REDACTION.md.
 	AllowFindings bool
+	// Git is the project's git state, collected by the CALLER — the cli
+	// executes git (D030 precedent) so this package stays exec-free and
+	// deterministic under test. nil means no repository or no git binary;
+	// manifest.json omits the key then. The dirty-worktree consent gate
+	// (--allow-dirty) is also the caller's: by the time Create runs, packing
+	// has been approved.
+	Git *GitState
 }
 
 // Result reports what Create wrote.
@@ -320,6 +349,7 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 		CreatedAt:       modified.Format(time.RFC3339),
 		AgentmodVersion: opts.Version,
 		Platform:        opts.Platform,
+		Git:             opts.Git,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("handoff create: %w", err)

@@ -898,3 +898,18 @@ Read D034–D036 + this before touching snapshot/docs code.
   "What is missing" lines. Binary smoke: init → create → unzip both
   docs read correctly → `shasum -a 256 -c` passes incl. both new
   members.
+
+## D038 — 2026-06-11 — loop.sh limit-detection broadened (harness, run 3)
+Run 2 ended at the MONTHLY SPEND limit ("You've hit your monthly spend
+limit · raise it at claude.ai/settings/usage") — a message the D015 backoff
+grep (session/usage/rate limit) did not match, so iterations 26–60 burned in
+seconds again. Fix: pattern now also matches `spend limit|limit reached|hit
+your` (the stable prefix of every Claude limit message observed so far);
+the 2000-byte size guard still prevents false positives on real work logs.
+Note a spend limit does not reset on a timer — the 15-min retry loop now
+doubles as "wait for the user to raise it" (bounded at 48 sleeps). Run 2
+garbage logs archived to reports/run2-spendlimited/. Run 2 was killed
+mid-iteration leaving a PARTIAL but green edit to internal/handoff
+(git-metadata slice start; builds, all tests pass) — left in the working
+tree for the next iteration to finish. Run 3: AGENTMOD_LOOP_MAX_ITERS=30
+(~15 tasks remain).

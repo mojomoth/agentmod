@@ -83,7 +83,7 @@ while [ "$i" -le "$MAX_ITERS" ]; do
   # the words "rate limit" in its work output.
   if [ "$rc" -ne 0 ] \
      && [ "$(wc -c < "$log")" -lt 2000 ] \
-     && grep -qiE 'session limit|usage limit|rate limit' "$log"; then
+     && grep -qiE 'session limit|usage limit|rate limit|spend limit|limit reached|hit your' "$log"; then
     ratelimit_sleeps=$((ratelimit_sleeps + 1))
     if [ "$ratelimit_sleeps" -gt "$MAX_RATELIMIT_SLEEPS" ]; then
       echo "[loop] Rate-limited for more than $MAX_RATELIMIT_SLEEPS sleep periods; giving up."

@@ -1,9 +1,13 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 6 final item — doctor
-"Agent config paths" portability/MCP finding, D046; Phase 6 COMPLETE)
+Last updated: 2026-06-11 (iteration: Phase 7 slice 1 — `handoff create
+--for-git` tree package under .agentmod-handoff/, D047; T28 🟡)
 
 ## Where things stand
+- Phase 7 IN PROGRESS: slice 1 landed (git handoff tree writer, D047).
+  NEXT SLICE OWNS: sessions/logs exclusion for --for-git +
+  --include-sessions encryption refusal — until it lands, --for-git
+  packages still carry sessions/logs and must not be called session-safe.
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
   both shell hooks + rc editor + env-hygiene integration tests + the
   first-session diagnosis). Phase 3 COMPLETE (six doctor slices + guard
@@ -862,6 +866,45 @@ Last updated: 2026-06-11 (iteration: Phase 6 final item — doctor
     grew the ok-line assertion, fresh-machine grew wantNoFinding.
     Binary smoke in /tmp passed (warn ×2 w/ local-equivalent path,
     ok line after removing the fixture).
+- git handoff tree writer LANDED and green (Phase 7 slice 1 ✅, D047,
+  T28 🟡): new `internal/handoff/gitpack.go` (`GitDirName`, `treeSink`,
+  `CreateForGit`) + `--for-git` in runHandoffCreate. Read D047 (+D034/
+  D035) before touching git-handoff code.
+  - Format SETTLED (the §13 deferral): tree of PLAIN FILES under
+    `.agentmod-handoff/` — same six root members + payload/ as a .amod,
+    byte-identical content, `shasum -a 256 -c` works in the directory
+    (smoked). writeSnapshot refactored onto a `memberSink` interface
+    (zipSink/treeSink) — one walk feeds both formats, zero churn in
+    pre-existing handoff tests (they passed unmodified).
+  - treeSink: dir perms applied deepest-first at Close (D043 pattern),
+    files O_EXCL + explicit Chmod (umask-proof), symlink perm bits not
+    settable (inventory still records source bits — future tree-verify
+    must expect that mismatch).
+  - CreateForGit: destination fixed at project root (OutputPath ignored;
+    cli rejects --output with --for-git); previous package recognized by
+    manifest.json → REPLACED via temp-sibling + D031 swap (incl. the
+    Darwin rename gotcha); foreign dir/file at the path → refused
+    untouched. --allow-findings rejected with --for-git (committable
+    package never packs known private-key material). Manifest gained
+    `for_git` (omitempty; absent from .amod manifests, asserted).
+  - renderHandoffDoc/renderRestoreDoc grew a forGit param: git-mode
+    wording explains commit-to-publish and HONESTLY notes the creating
+    build cannot restore a directory tree yet (D034 precedent); a new
+    Phase 7 TASKS item (directory reader) drops the notes if taken —
+    NOT in GOAL §29, decide when reached.
+  - Dirty-gate interplay deliberate: uncommitted .agentmod-handoff/
+    makes the NEXT create dirty — the package is meant to be committed;
+    closing cli line says so. ensureGitignore never touches it.
+  - Tests: 8 funcs in new gitpack_test.go (tree members + payload spot
+    checks, checksums re-hashed against disk, inventory presence,
+    for_git only in tree manifests, deterministic replace of a stale
+    package, foreign-dir/non-dir refusals, hard-finding refusal keeps
+    previous package intact / fresh run leaves nothing, git-mode doc
+    anchors) + 2 cli funcs (happy path w/ no .amod side-product, flag
+    conflicts create nothing). Binary smoke in /tmp passed: init →
+    --for-git → tree layout + shasum -c OK → replace run → foreign-dir
+    refusal → --allow-findings conflict message; no partial/old
+    leftovers.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -894,27 +937,29 @@ other two homes and the skills list unchanged; no agentmod artifacts.
 Later same day: `~/.codex` mtime 6월 11 02:28, same verdict. And again
 16:44, then 19:15 — skills list + other two homes still match baseline.
 D046 iteration re-verified: all three homes + skills list unchanged from
-the 19:15 reading.)
+the 19:15 reading. D047 iteration: same — `~/.codex` mtime still 19:15,
+all three homes + skills list match baseline.)
 
 ## Failing tests
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 7, slice 1: "--for-git → .agentmod-handoff/, git-safe contents"
-(T28). Read FABLE_PLAN §19 + the IMPLEMENTATION_PLAN git-handoff section
-BEFORE slicing — decide there how much lands in slice 1 vs the
-sessions/logs-exclusion and `pack --for-git` items. Notes:
-- Build on the existing create pipeline (internal/handoff Create +
-  exclusion Rules, D034/D035): a git handoff is a differently-targeted,
-  more-excluded snapshot, not a new format — confirm against §19 before
-  assuming.
-- `.agentmod-handoff/` needs a .gitignore DECISION (it must be
-  COMMITTABLE — that is the point) and likely an ensureGitignore
-  NON-entry; check what §19 says about where it sits relative to the
-  project root.
-- `--include-sessions` without encryption must FAIL with the §19
-  explanation (T28 row) — that refusal can land in slice 1 or 2;
-  record the split in TASKS.md when slicing.
+Phase 7, slice 2: "sessions/logs excluded; --include-sessions fails w/
+encryption explanation" (T28 row). Read FABLE_PLAN §19 + §15 (where each
+agent stores sessions) + D035/D047 before coding. Notes:
+- Shape: a ForGit rule set layered on DefaultRules() (D035's Rule list
+  makes this cheap) wired through CreateOptions.Rules by the cli when
+  --for-git is set — or a dedicated ForGitRules() helper in exclude.go;
+  decide and record. Candidate targets to RESEARCH first (don't guess):
+  .agentmod/logs/ (ours), claude/projects/ + history/session artifacts,
+  codex/sessions/ + history.jsonl + log/, opencode xdg data when
+  xdg_full_isolation is on. REDACTION.md should name the new rule IDs.
+- `--include-sessions` parses ONLY with --for-git (decide: reject it for
+  normal create, which already includes sessions) and must FAIL with the
+  §19 encryption explanation (MVP ships no encryption).
+- Update the git-mode HANDOFF.md "What is missing" section to state the
+  sessions/logs exclusion once it is true; T28 flips ✅ only after both
+  this slice's halves are tested.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

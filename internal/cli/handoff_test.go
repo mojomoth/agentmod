@@ -231,6 +231,62 @@ func TestHandoffCreateOutsideProject(t *testing.T) {
 	wantContains(t, "stderr", stderr, "requires an agentmod project", "agentmod init")
 }
 
+func TestHandoffCreateForGit(t *testing.T) {
+	root := makeProject(t, config.Default())
+	code, stdout, stderr := runHandoffForTest(t, fakeEnv(root, nil), "create", "--for-git")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	target := filepath.Join(root, handoff.GitDirName)
+	wantContains(t, "stdout", stdout,
+		"Created git handoff package: "+target,
+		"Commit "+handoff.GitDirName,
+	)
+	var m handoff.Manifest
+	data, err := os.ReadFile(filepath.Join(target, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatal(err)
+	}
+	if !m.ForGit {
+		t.Error("manifest for_git = false, want true")
+	}
+	// --for-git must not also write a .amod into snapshots/.
+	entries, err := os.ReadDir(filepath.Join(root, ".agentmod", "snapshots"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("--for-git also created %d snapshot entr(ies)", len(entries))
+	}
+}
+
+func TestHandoffCreateForGitFlagConflicts(t *testing.T) {
+	root := makeProject(t, config.Default())
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"output", []string{"create", "--for-git", "--output", "x.amod"}, "--output cannot be combined with --for-git"},
+		{"allow-findings", []string{"create", "--allow-findings", "--for-git"}, "--allow-findings cannot be combined with --for-git"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, _, stderr := runHandoffForTest(t, fakeEnv(root, nil), tc.args...)
+			if code != ExitError {
+				t.Errorf("exit = %d, want %d", code, ExitError)
+			}
+			wantContains(t, "stderr", stderr, tc.want)
+			if _, err := os.Lstat(filepath.Join(root, handoff.GitDirName)); !os.IsNotExist(err) {
+				t.Errorf("rejected invocation created %s (err=%v)", handoff.GitDirName, err)
+			}
+		})
+	}
+}
+
 func TestHandoffArgumentValidation(t *testing.T) {
 	root := makeProject(t, config.Default())
 	cases := []struct {

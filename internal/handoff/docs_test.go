@@ -80,7 +80,7 @@ func TestCreateRestoreDocContents(t *testing.T) {
 func TestRenderHandoffDocStates(t *testing.T) {
 	base := Result{PayloadFiles: 1, PayloadBytes: 7}
 
-	clean := string(renderHandoffDoc(testNow, "v", "os/arch", "proj", &base))
+	clean := string(renderHandoffDoc(testNow, "v", "os/arch", "proj", false, &base))
 	for _, want := range []string{
 		"- 1 file (7 bytes) under `payload/`",
 		"- Nothing was excluded by the redaction policy.\n",
@@ -98,7 +98,7 @@ func TestRenderHandoffDocStates(t *testing.T) {
 		{Path: ".agentmod/.git/", RuleID: "vcs-git", Reason: "r"},
 	}
 	busy.Findings = []ScanFinding{{Path: ".agentmod/x", Pattern: "sk-token", Line: 1}}
-	doc := string(renderHandoffDoc(testNow, "v", "os/arch", "proj", &busy))
+	doc := string(renderHandoffDoc(testNow, "v", "os/arch", "proj", false, &busy))
 	for _, want := range []string{
 		"- 2 files (7 bytes) under `payload/`",
 		"- 2 entries were excluded by the redaction policy",
@@ -110,7 +110,7 @@ func TestRenderHandoffDocStates(t *testing.T) {
 	}
 
 	busy.Findings = append(busy.Findings, ScanFinding{Path: ".agentmod/y", Pattern: "sk-token", Line: 2})
-	doc = string(renderHandoffDoc(testNow, "v", "os/arch", "proj", &busy))
+	doc = string(renderHandoffDoc(testNow, "v", "os/arch", "proj", false, &busy))
 	if !strings.Contains(doc, "- Secret scan: 2 candidate findings in packed files") {
 		t.Errorf("two-finding HANDOFF.md missing plural scan line\n--- document ---\n%s", doc)
 	}

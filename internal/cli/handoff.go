@@ -39,13 +39,16 @@ func runHandoff(args []string, stdout, stderr io.Writer, env Env) int {
 }
 
 // runHandoffCreate implements `agentmod handoff create [--output PATH]
-// [--allow-findings] [--allow-dirty]`: pack this project's .agentmod/ into
-// a .amod snapshot (handoff.Create). The default output is
+// [--allow-findings] [--allow-dirty] [--for-git]`: pack this project's
+// .agentmod/ into a .amod snapshot (handoff.Create), or — with --for-git —
+// into the committable plain-file tree at .agentmod-handoff/
+// (handoff.CreateForGit, FABLE_PLAN §19). The default .amod output is
 // .agentmod/snapshots/<project>-<timestamp>.amod.
 func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 	output := ""
 	allowFindings := false
 	allowDirty := false
+	forGit := false
 	for i := 0; i < len(args); i++ {
 		switch {
 		case args[i] == "--output":
@@ -59,10 +62,20 @@ func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 			allowFindings = true
 		case args[i] == "--allow-dirty":
 			allowDirty = true
+		case args[i] == "--for-git":
+			forGit = true
 		default:
-			fmt.Fprintf(stderr, "agentmod: handoff create: unsupported argument %q (supported: --output PATH, --allow-findings, --allow-dirty)\n", args[i])
+			fmt.Fprintf(stderr, "agentmod: handoff create: unsupported argument %q (supported: --output PATH, --allow-findings, --allow-dirty, --for-git)\n", args[i])
 			return ExitError
 		}
+	}
+	if forGit && output != "" {
+		fmt.Fprintf(stderr, "agentmod: handoff create: --output cannot be combined with --for-git: the git handoff package always lands at %s/ in the project root so the repository finds it\n", handoff.GitDirName)
+		return ExitError
+	}
+	if forGit && allowFindings {
+		fmt.Fprintf(stderr, "agentmod: handoff create: --allow-findings cannot be combined with --for-git: a git handoff package is committed to a shared repository, so files the secret scan flags as private-key material are never packed — remove or exclude them instead\n")
+		return ExitError
 	}
 
 	cwd, err := env.Getwd()
@@ -93,7 +106,7 @@ func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 	if env.Now != nil {
 		now = env.Now()
 	}
-	if output == "" {
+	if output == "" && !forGit {
 		name := fmt.Sprintf("%s-%s.amod", filepath.Base(proj.Root), now.UTC().Format("20060102-150405"))
 		output = filepath.Join(proj.AgentmodDir, layout.SnapshotsDir, name)
 	}
@@ -102,7 +115,7 @@ func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 	if goos == "" {
 		goos = "unknown"
 	}
-	res, err := handoff.Create(handoff.CreateOptions{
+	opts := handoff.CreateOptions{
 		ProjectRoot:   proj.Root,
 		OutputPath:    output,
 		CreatedAt:     now,
@@ -110,12 +123,22 @@ func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 		Platform:      goos + "/" + runtime.GOARCH,
 		AllowFindings: allowFindings,
 		Git:           gitState,
-	})
+	}
+	var res *handoff.Result
+	if forGit {
+		res, err = handoff.CreateForGit(opts)
+	} else {
+		res, err = handoff.Create(opts)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "agentmod: %v\n", err)
 		return ExitError
 	}
-	fmt.Fprintf(stdout, "Created handoff snapshot: %s\n", res.OutputPath)
+	if forGit {
+		fmt.Fprintf(stdout, "Created git handoff package: %s\n", res.OutputPath)
+	} else {
+		fmt.Fprintf(stdout, "Created handoff snapshot: %s\n", res.OutputPath)
+	}
 	fmt.Fprintf(stdout, "  payload: %d files, %d bytes (manifest, inventory, and checksums included)\n", res.PayloadFiles, res.PayloadBytes)
 	switch {
 	case gitState == nil:
@@ -151,7 +174,11 @@ func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 		}
 		fmt.Fprintf(stdout, "    %s line %d (%s%s)\n", f.Path, f.Line, f.Pattern, mark)
 	}
-	fmt.Fprintf(stdout, "Verify it anywhere with 'agentmod handoff verify'; restore it on the target machine with 'agentmod handoff restore'.\n")
+	if forGit {
+		fmt.Fprintf(stdout, "Commit %s to publish this handoff with the repository (it is deliberately not gitignored; until committed it makes the worktree dirty).\n", handoff.GitDirName+string(filepath.Separator))
+	} else {
+		fmt.Fprintf(stdout, "Verify it anywhere with 'agentmod handoff verify'; restore it on the target machine with 'agentmod handoff restore'.\n")
+	}
 	return ExitOK
 }
 

@@ -15,7 +15,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -51,6 +50,9 @@ type Manifest struct {
 	// is not inside a git repository or no git binary was available at
 	// create time. Restore must tolerate its absence.
 	Git *GitState `json:"git,omitempty"`
+	// ForGit marks a git-storable tree package created with --for-git
+	// (FABLE_PLAN §19). Absent from regular .amod snapshots.
+	ForGit bool `json:"for_git,omitempty"`
 }
 
 // GitState is the manifest's record of the project's git repository at
@@ -109,6 +111,12 @@ type CreateOptions struct {
 	// (--allow-dirty) is also the caller's: by the time Create runs, packing
 	// has been approved.
 	Git *GitState
+	// ForGit marks a git-storable tree package (FABLE_PLAN §19): the
+	// manifest records it and the human-readable documents describe the
+	// tree format instead of the .amod file. The FORMAT owns the flag —
+	// CreateForGit forces it true, Create forces it false — so a caller
+	// can never mislabel a package.
+	ForGit bool
 }
 
 // Result reports what Create wrote.
@@ -141,6 +149,7 @@ type Result struct {
 // prefixed temp file in the output directory and renames it over
 // OutputPath only after the zip is complete; any error removes the temp.
 func Create(opts CreateOptions) (*Result, error) {
+	opts.ForGit = false // the .amod format owns the flag
 	agentmodDir := filepath.Join(opts.ProjectRoot, project.DirName)
 	if fi, err := os.Lstat(agentmodDir); err != nil {
 		return nil, fmt.Errorf("handoff create: %w", err)
@@ -168,7 +177,8 @@ func Create(opts CreateOptions) (*Result, error) {
 		}
 	}()
 
-	res, err := writeSnapshot(tmp, agentmodDir, tmp.Name(), opts)
+	sink := &zipSink{zw: zip.NewWriter(tmp), modified: opts.CreatedAt.UTC()}
+	res, err := writeSnapshot(sink, agentmodDir, []string{tmp.Name(), opts.OutputPath}, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -187,11 +197,64 @@ func Create(opts CreateOptions) (*Result, error) {
 	return res, nil
 }
 
-// writeSnapshot streams the zip into w: payload members first (hashing as
-// it copies), then inventory/manifest/checksums derived from those hashes.
-// tmpName is the in-progress file's own path, skipped if the walk meets it.
-func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions) (*Result, error) {
-	zw := zip.NewWriter(w)
+// memberSink receives the snapshot's members in write order. zipSink
+// renders them as .amod zip members; treeSink (gitpack.go) renders them as
+// plain files for the git-storable tree variant — both are fed by the same
+// writeSnapshot walk, so the two formats can never drift in content.
+type memberSink interface {
+	// Dir records a payload directory; name has no trailing slash.
+	Dir(name string, perm fs.FileMode) error
+	// Symlink records a symlink member whose content IS the target string.
+	Symlink(name string, perm fs.FileMode, target string) error
+	// File records a regular member with its full content.
+	File(name string, perm fs.FileMode, data []byte) error
+	// Close finalizes the sink's output.
+	Close() error
+}
+
+// zipSink renders members as .amod zip members, all stamped with the
+// snapshot's creation time so identical inputs produce byte-identical zips.
+type zipSink struct {
+	zw       *zip.Writer
+	modified time.Time
+}
+
+func (s *zipSink) Dir(name string, perm fs.FileMode) error {
+	hdr := &zip.FileHeader{Name: name + "/", Method: zip.Store, Modified: s.modified}
+	hdr.SetMode(fs.ModeDir | perm)
+	_, err := s.zw.CreateHeader(hdr)
+	return err
+}
+
+func (s *zipSink) Symlink(name string, perm fs.FileMode, target string) error {
+	hdr := &zip.FileHeader{Name: name, Method: zip.Store, Modified: s.modified}
+	hdr.SetMode(fs.ModeSymlink | perm)
+	w, err := s.zw.CreateHeader(hdr)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write([]byte(target))
+	return err
+}
+
+func (s *zipSink) File(name string, perm fs.FileMode, data []byte) error {
+	hdr := &zip.FileHeader{Name: name, Method: zip.Deflate, Modified: s.modified}
+	hdr.SetMode(perm)
+	w, err := s.zw.CreateHeader(hdr)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(data)
+	return err
+}
+
+func (s *zipSink) Close() error { return s.zw.Close() }
+
+// writeSnapshot walks the payload into sink — payload members first (hashing
+// as it copies), then inventory/manifest/checksums derived from those
+// hashes. skipPaths are in-progress output files skipped if the walk meets
+// them (the zip temp file and OutputPath when they sit inside .agentmod/).
+func writeSnapshot(sink memberSink, agentmodDir string, skipPaths []string, opts CreateOptions) (*Result, error) {
 	modified := opts.CreatedAt.UTC()
 	res := &Result{}
 	var entries []InventoryEntry
@@ -202,7 +265,7 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 	}
 
 	skipAbs := map[string]bool{}
-	for _, p := range []string{tmpName, opts.OutputPath} {
+	for _, p := range skipPaths {
 		if abs, err := filepath.Abs(p); err == nil {
 			skipAbs[abs] = true
 		}
@@ -258,25 +321,16 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 		}
 		switch {
 		case d.IsDir():
-			hdr := &zip.FileHeader{Name: name + "/", Method: zip.Store, Modified: modified}
-			hdr.SetMode(fs.ModeDir | info.Mode().Perm())
-			_, err := zw.CreateHeader(hdr)
-			return err
+			return sink.Dir(name, info.Mode().Perm())
 		case d.Type()&fs.ModeSymlink != 0:
 			target, err := os.Readlink(path)
 			if err != nil {
 				return err
 			}
-			hdr := &zip.FileHeader{Name: name, Method: zip.Store, Modified: modified}
-			hdr.SetMode(fs.ModeSymlink | info.Mode().Perm())
-			mw, err := zw.CreateHeader(hdr)
-			if err != nil {
+			if err := sink.Symlink(name, info.Mode().Perm(), target); err != nil {
 				return err
 			}
 			sum := sha256.Sum256([]byte(target))
-			if _, err := mw.Write([]byte(target)); err != nil {
-				return err
-			}
 			entries = append(entries, InventoryEntry{
 				Path:          name,
 				Size:          int64(len(target)),
@@ -295,13 +349,7 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 				return err
 			}
 			res.Findings = append(res.Findings, scanContent(relProj, data)...)
-			hdr := &zip.FileHeader{Name: name, Method: zip.Deflate, Modified: modified}
-			hdr.SetMode(info.Mode().Perm())
-			mw, err := zw.CreateHeader(hdr)
-			if err != nil {
-				return err
-			}
-			if _, err := mw.Write(data); err != nil {
+			if err := sink.File(name, info.Mode().Perm(), data); err != nil {
 				return err
 			}
 			sum := sha256.Sum256(data)
@@ -350,6 +398,7 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 		AgentmodVersion: opts.Version,
 		Platform:        opts.Platform,
 		Git:             opts.Git,
+		ForGit:          opts.ForGit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("handoff create: %w", err)
@@ -360,8 +409,8 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 	}
 	redaction := renderRedaction(modified, opts.Version, res.Excluded, res.Findings)
 	handoffDoc := renderHandoffDoc(modified, opts.Version, opts.Platform,
-		filepath.Base(filepath.Clean(opts.ProjectRoot)), res)
-	restoreDoc := renderRestoreDoc(opts.Version)
+		filepath.Base(filepath.Clean(opts.ProjectRoot)), opts.ForGit, res)
+	restoreDoc := renderRestoreDoc(opts.Version, opts.ForGit)
 
 	// checksums.txt: "<sha256>  <member>" (sha256sum format) for every
 	// content-bearing member — manifest, inventory, redaction report, the
@@ -392,17 +441,11 @@ func writeSnapshot(w io.Writer, agentmodDir, tmpName string, opts CreateOptions)
 		{RestoreDocName, restoreDoc},
 		{ChecksumsName, []byte(checksums.String())},
 	} {
-		hdr := &zip.FileHeader{Name: m.name, Method: zip.Deflate, Modified: modified}
-		hdr.SetMode(0o644)
-		mw, err := zw.CreateHeader(hdr)
-		if err != nil {
-			return nil, fmt.Errorf("handoff create: %w", err)
-		}
-		if _, err := mw.Write(m.data); err != nil {
+		if err := sink.File(m.name, 0o644, m.data); err != nil {
 			return nil, fmt.Errorf("handoff create: %w", err)
 		}
 	}
-	if err := zw.Close(); err != nil {
+	if err := sink.Close(); err != nil {
 		return nil, fmt.Errorf("handoff create: %w", err)
 	}
 	return res, nil

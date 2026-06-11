@@ -29,12 +29,18 @@ const (
 )
 
 // renderHandoffDoc produces the HANDOFF.md member: what the snapshot is,
-// how to restore it, and what is deliberately missing from it.
-func renderHandoffDoc(createdAt time.Time, version, platform, projectName string, res *Result) []byte {
+// how to restore it, and what is deliberately missing from it. forGit
+// switches the wording from the .amod file format to the git-storable tree
+// under .agentmod-handoff/ (D047).
+func renderHandoffDoc(createdAt time.Time, version, platform, projectName string, forGit bool, res *Result) []byte {
 	var b strings.Builder
 	b.WriteString("# Agent environment handoff\n\n")
-	fmt.Fprintf(&b, "This `.amod` snapshot packs the per-project agent environment of\n`%s` — the `.agentmod/` tree holding project-local Claude Code,\nCodex CLI, and OpenCode configuration, skills, sessions, and working\ncontext. Created %s by agentmod %s on %s.\n",
-		projectName, createdAt.UTC().Format(time.RFC3339), version, platform)
+	what := "This `.amod` snapshot packs"
+	if forGit {
+		what = "This git-storable handoff package (a plain-file tree under\n`" + GitDirName + "/`) packs"
+	}
+	fmt.Fprintf(&b, "%s the per-project agent environment of\n`%s` — the `.agentmod/` tree holding project-local Claude Code,\nCodex CLI, and OpenCode configuration, skills, sessions, and working\ncontext. Created %s by agentmod %s on %s.\n",
+		what, projectName, createdAt.UTC().Format(time.RFC3339), version, platform)
 
 	b.WriteString("\n## What is in it\n\n")
 	fmt.Fprintf(&b, "- %s (%d bytes) under `payload/`, named by project-root-relative path.\n",
@@ -42,7 +48,11 @@ func renderHandoffDoc(createdAt time.Time, version, platform, projectName string
 	b.WriteString("- `inventory.json` lists every payload file with size, mode, and\n  sha256; `checksums.txt` (sha256sum format) covers every\n  content-bearing member.\n")
 
 	b.WriteString("\n## How to restore\n\n")
-	b.WriteString("Run `agentmod handoff restore <this file>` inside the target project;\n`RESTORE.md` (packed next to this document) has the full steps,\nincluding re-login guidance.\n")
+	if forGit {
+		b.WriteString("This package travels with the repository itself: commit\n`" + GitDirName + "/` (it is deliberately not gitignored) and the\nrecipient receives it by pulling. `RESTORE.md` next to this document has\nthe restore steps, including re-login guidance.\n")
+	} else {
+		b.WriteString("Run `agentmod handoff restore <this file>` inside the target project;\n`RESTORE.md` (packed next to this document) has the full steps,\nincluding re-login guidance.\n")
+	}
 
 	b.WriteString("\n## What is missing\n\n")
 	if len(res.Excluded) == 0 {
@@ -65,8 +75,11 @@ func renderHandoffDoc(createdAt time.Time, version, platform, projectName string
 
 // renderRestoreDoc produces the RESTORE.md member: step-by-step restore
 // instructions plus the re-login and reinstall guidance the target machine
-// needs once the snapshot is unpacked.
-func renderRestoreDoc(version string) []byte {
+// needs once the snapshot is unpacked. forGit swaps step 3 for the tree
+// package's honest state: the build that writes a tree cannot yet restore
+// one (the directory reader is a later Phase 7 item, D047 — the D034
+// honesty precedent).
+func renderRestoreDoc(version string, forGit bool) []byte {
 	var b strings.Builder
 	b.WriteString("# Restoring this snapshot\n\n")
 	fmt.Fprintf(&b, "Written by agentmod %s at create time. `agentmod handoff restore`\nfollows these steps; the re-login and reinstall guidance below applies\nafter any restore.\n", version)
@@ -74,7 +87,11 @@ func renderRestoreDoc(version string) []byte {
 	b.WriteString("\n## Steps\n\n")
 	b.WriteString("1. Install agentmod on the target machine, plus the coding agents you\n   use (claude, codex, opencode).\n")
 	b.WriteString("2. Enter (or create) the target project directory and run\n   `agentmod init` — it builds the `.agentmod/` layout, wires the\n   Claude guard, edits `.gitignore`, and installs the shell hook.\n")
-	b.WriteString("3. From the project root run `agentmod handoff restore <file>.amod`.\n   Restore verifies the schema version and checksums, backs up any\n   existing `.agentmod/` first, and extracts only under `.agentmod/` —\n   it never executes anything from the snapshot.\n")
+	if forGit {
+		b.WriteString("3. Restore the package. NOTE: the agentmod build that wrote this\n   package cannot yet restore a directory tree — check whether your\n   build's `agentmod handoff restore` accepts `" + GitDirName + "`;\n   otherwise copy what you need from `payload/.agentmod/` into the\n   project's `.agentmod/` by hand (every file is stored verbatim, and\n   nothing in a package is ever executed).\n")
+	} else {
+		b.WriteString("3. From the project root run `agentmod handoff restore <file>.amod`.\n   Restore verifies the schema version and checksums, backs up any\n   existing `.agentmod/` first, and extracts only under `.agentmod/` —\n   it never executes anything from the snapshot.\n")
+	}
 	b.WriteString("4. Run `agentmod doctor` and fix whatever it reports.\n")
 
 	b.WriteString("\n## Re-login (auth never travels)\n\n")

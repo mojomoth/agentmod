@@ -128,9 +128,20 @@ Add/split items freely; keep units small.
        not gated on enabled flags, doctor stays read-only; Phase 6 done)
 
 ## Phase 7 — git handoff
-- [ ] --for-git → .agentmod-handoff/, git-safe contents (+ tests)
+- [x] --for-git → .agentmod-handoff/, git-safe contents (+ tests)
+      (D047: tree of PLAIN FILES under .agentmod-handoff/ — same six root
+       members + payload/ as a .amod, fed by the same writeSnapshot walk
+       via a new memberSink interface (zipSink/treeSink); replace-or-refuse
+       gate keyed on manifest.json; --for-git incompatible with --output
+       and --allow-findings; manifest gains for_git; HANDOFF/RESTORE
+       renderers grew honest git-mode wording. NOTE: sessions/logs still
+       travel until the next slice — --for-git is NOT yet git-safe for
+       sessions; T28 stays 🟡)
 - [ ] sessions/logs excluded; --include-sessions fails w/ encryption explanation (+ tests)
 - [ ] pack --for-git alias (+ tests)
+- [ ] handoff inspect/verify/restore accept a tree package directory
+      (drops the honesty notes D047 put in the git-mode HANDOFF/RESTORE
+       docs; not in GOAL §29 — decide scope when reached, record either way)
 
 ## Phase 8 — docs + scenarios
 - [ ] Scenario tests §27: proj00/proj01/proj02 isolation matrix (mock binaries)

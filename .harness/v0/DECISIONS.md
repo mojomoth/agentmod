@@ -1294,3 +1294,58 @@ stub gone). Read D034+D040–D044+this before touching restore output.
   (invalid-JSON opencode stub → file-level warn while "OpenCode config"
   stays ok — stat vs content split) + agentConfigPathLines helper;
   AllHealthy asserts the ok line, fresh-machine asserts no line.
+
+## D047 — 2026-06-11 — Git handoff format + CreateForGit (Phase 7 slice 1)
+
+- **Format SETTLED (the question IMPLEMENTATION_PLAN §13 deferred to
+  Phase 7): a tree of PLAIN FILES under `.agentmod-handoff/`, not a .amod
+  zip.** A git handoff's whole point is being committed, reviewed, and
+  diffed — REDACTION.md/HANDOFF.md/manifest.json must be readable in the
+  repository browser and a PR must show exactly which config bytes are
+  being shared (FABLE_PLAN §19 "human-readable HANDOFF document" +
+  §8 secrets-review guardrails). A zip blob defeats all of that and
+  bloats history on every re-pack. Member set and bytes are IDENTICAL to
+  a .amod's (manifest.json, inventory.json, REDACTION.md, HANDOFF.md,
+  RESTORE.md, checksums.txt, payload/ tree), so `shasum -a 256 -c
+  checksums.txt` works inside the directory (binary-smoked) and a future
+  directory reader can reuse every structure.
+- **One walk, two formats**: writeSnapshot refactored onto a 4-method
+  `memberSink` interface (Dir/Symlink/File/Close); `zipSink` reproduces
+  the old zip behavior byte-for-byte (all pre-existing handoff tests
+  passed unchanged), `treeSink` (gitpack.go) writes plain files. Tree
+  specifics: dir perm bits recorded during the walk, applied
+  deepest-first at Close so a read-only dir can't block its own children
+  (D043 precedent); file modes O_EXCL-created + explicit Chmod
+  (umask-proof); symlink perm bits not settable portably (git doesn't
+  store them either) — inventory still records the source bits, so a
+  future tree-verify must expect that mismatch.
+- **Destination fixed at `<project>/.agentmod-handoff/`** (FABLE_PLAN
+  §10); `CreateForGit` ignores OutputPath and the cli REJECTS
+  `--output` with `--for-git`. Replace-or-refuse: a previous package
+  (recognized by manifest.json at its root) is REPLACED via
+  build-in-temp-sibling + D031 swap (incl. the Darwin
+  rename-onto-empty-dir gotcha); any other dir/file at the path is the
+  user's — refused untouched.
+- **`--allow-findings` REJECTED with `--for-git`**: a snapshot kept on
+  the user's own disk may carry known private-key material on explicit
+  request; a package destined for a shared repository never does
+  (FABLE_PLAN §8 "attempts to include secrets in a ... Git Handoff").
+  Library callers technically can set AllowFindings — the cli gate is
+  the product surface; revisit only if a second consumer appears.
+- **Manifest gained `for_git` (omitempty)** — absent from .amod
+  manifests (asserted), so old snapshots/readers are unaffected. The
+  FORMAT owns the flag: CreateForGit forces true, Create forces false.
+- **Honesty notes (D034 precedent)**: git-mode HANDOFF.md/RESTORE.md say
+  the creating build cannot yet restore a directory tree and explain
+  commit-to-publish; a new TASKS item (directory reader for
+  inspect/verify/restore) drops those notes if/when in scope — it is
+  NOT in GOAL §29, decide when reached.
+- **Dirty-gate interplay (deliberate)**: the §20 gate still runs before
+  --for-git, and a freshly created (uncommitted) `.agentmod-handoff/`
+  makes the worktree dirty for the NEXT create — correct, the package is
+  meant to be committed; the cli's closing line says so. ensureGitignore
+  never touches `.agentmod-handoff/` (committable by design; the
+  `.agentmod/` pattern cannot match it — different name).
+- **NOT YET in slice 1**: sessions/logs still travel (next slice owns
+  the ForGit rule set + `--include-sessions` encryption refusal) —
+  --for-git must not be described as session-safe until then (T28 🟡).

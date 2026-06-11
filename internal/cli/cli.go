@@ -51,6 +51,10 @@ Commands:
               private-key material refuses creation unless --allow-findings;
               a dirty git worktree refuses unless --allow-dirty; default
               output is .agentmod/snapshots/<project>-<timestamp>.amod;
+              handoff create --for-git writes the same members as a
+              committable plain-file tree under .agentmod-handoff/ instead
+              (replacing a previous package there; incompatible with
+              --output and --allow-findings);
               handoff inspect FILE prints the manifest and redaction
               report without extracting; handoff verify FILE re-hashes
               every member against its checksums and exits 3 on mismatch;

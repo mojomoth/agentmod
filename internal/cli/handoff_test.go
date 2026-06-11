@@ -623,6 +623,60 @@ func TestPackAliasCreates(t *testing.T) {
 	wantContains(t, "stdout", out.String(), "Created handoff snapshot: "+output)
 }
 
+func TestPackForGitAlias(t *testing.T) {
+	// `agentmod pack --for-git` is a required command in its own right
+	// (FABLE_PLAN §19/§29), not just a flag combination that happens to
+	// parse — pin that the alias produces the git handoff package.
+	root := makeProject(t, config.Default())
+	var out, errBuf bytes.Buffer
+	code := run([]string{"pack", "--for-git"}, &out, &errBuf, fakeEnv(root, nil))
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, errBuf.String())
+	}
+	target := filepath.Join(root, handoff.GitDirName)
+	wantContains(t, "stdout", out.String(),
+		"Created git handoff package: "+target,
+		"Commit "+handoff.GitDirName,
+	)
+	var m handoff.Manifest
+	data, err := os.ReadFile(filepath.Join(target, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatal(err)
+	}
+	if !m.ForGit {
+		t.Error("manifest for_git = false, want true")
+	}
+	// The alias must not also write a .amod into snapshots/.
+	entries, err := os.ReadDir(filepath.Join(root, ".agentmod", "snapshots"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("pack --for-git also created %d snapshot entr(ies)", len(entries))
+	}
+}
+
+func TestPackForGitAliasIncludeSessionsRefused(t *testing.T) {
+	// The alias shares handoff create's full flag validation, including the
+	// §19 encryption refusal — and refuses before any FS work.
+	root := makeProject(t, config.Default())
+	var out, errBuf bytes.Buffer
+	code := run([]string{"pack", "--for-git", "--include-sessions"}, &out, &errBuf, fakeEnv(root, nil))
+	if code != ExitError {
+		t.Errorf("exit = %d, want %d", code, ExitError)
+	}
+	wantContains(t, "stderr", errBuf.String(), "does not implement encryption")
+	if _, err := os.Lstat(filepath.Join(root, handoff.GitDirName)); !os.IsNotExist(err) {
+		t.Errorf("rejected invocation created %s (err=%v)", handoff.GitDirName, err)
+	}
+	if entries, err := os.ReadDir(filepath.Join(root, ".agentmod", "snapshots")); err == nil && len(entries) != 0 {
+		t.Errorf("rejected invocation created %d snapshot entr(ies)", len(entries))
+	}
+}
+
 func TestHandoffRestoreRoundTrip(t *testing.T) {
 	// Create in project A, restore into project B: B's previous .agentmod/
 	// is backed up (deterministically named — fakeNow is fixed), the

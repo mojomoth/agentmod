@@ -1391,3 +1391,37 @@ stub gone). Read D034+D040–D044+this before touching restore output.
   .amod-still-packs-sessions pin + ForGitRules table; cli conflict rows).
   `pack --for-git` already WORKS (pack ≡ handoff create, same parser);
   its dedicated test is the remaining Phase 7 TASKS item.
+
+## D049 — 2026-06-11 — pack --for-git pinned by test; tree-package reader OUT OF SCOPE (Phase 7 complete)
+
+- **`pack --for-git` is now pinned by dedicated tests** (FABLE_PLAN §19
+  and §29 name it as a required command in its own right, so "pack ≡
+  handoff create, same parser" needed a test, not just a remark):
+  `TestPackForGitAlias` (exit 0, "Created git handoff package" +
+  commit-to-publish lines, manifest `for_git` true, no .amod
+  side-product in snapshots/) + `TestPackForGitAliasIncludeSessionsRefused`
+  (the §19 encryption refusal fires through the alias too, before any FS
+  work). ZERO product code changed — usage already covers it ("pack:
+  alias of 'handoff create' (same flags)"), and the alias dispatches to
+  the same runHandoffCreate parser.
+- **Tree-package reader (handoff inspect/verify/restore accepting a
+  `.agentmod-handoff/` DIRECTORY) decided OUT OF SCOPE for the MVP** —
+  the decide-and-record D047 deferred:
+  - GOAL §29's Git Handoff block requires only CREATION (both commands,
+    exclusions, encryption refusal) — all ✅. §27.6's scenario is also
+    creation-only. No completion condition needs a tree reader.
+  - The receiving side is not helpless: the git-mode RESTORE.md ships
+    inside every package and walks the manual path, the honesty notes
+    (D047) state plainly that this build restores only `.amod` files,
+    and `shasum -a 256 -c checksums.txt` works in the directory
+    (binary-smoked in D047) for integrity checking without agentmod.
+  - Cost is real: Open() is zip-coupled; a tree reader means a source
+    abstraction over Open/Verify/PlanRestore plus a symlink-vs-zip-entry
+    mismatch in verify (D047 recorded symlink perm bits differ) — a
+    multi-slice detour from the GOAL-mandated Phase 8 work.
+  - Consequence: the D047 honesty notes in git-mode HANDOFF.md/RESTORE.md
+    stay AS-IS (they are accurate); README limitations (Phase 8) must
+    list "git handoff packages are restored manually / by a future
+    version", alongside the existing limitation list.
+- **Phase 7 is COMPLETE** with this decision recorded; next is Phase 8
+  (scenario matrix T30, then docs).

@@ -1,15 +1,14 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 7 slice 2 — ForGit
-session/log exclusion + --include-sessions encryption refusal, D048;
-T28 ✅)
+Last updated: 2026-06-11 (iteration: Phase 7 final — pack --for-git
+alias tests + tree-package reader scoped OUT, D049; Phase 7 COMPLETE)
 
 ## Where things stand
-- Phase 7 IN PROGRESS: slice 1 (git handoff tree writer, D047) +
-  slice 2 (sessions/logs excluded in --for-git via ForGitRules,
-  --include-sessions always refuses, D048; T28 ✅). --for-git is now
-  session-safe. Remaining Phase 7 items: pack --for-git alias test;
-  optional tree-package reader (decide scope when reached, D047).
+- Phase 7 COMPLETE: slice 1 (git handoff tree writer, D047) + slice 2
+  (sessions/logs excluded via ForGitRules, --include-sessions always
+  refuses, D048; T28 ✅) + final item (pack --for-git pinned by tests;
+  tree-package reader decided OUT OF SCOPE, D049). Next: Phase 8
+  (scenario tests, then docs).
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
   both shell hooks + rc editor + env-hygiene integration tests + the
   first-session diagnosis). Phase 3 COMPLETE (six doctor slices + guard
@@ -940,6 +939,22 @@ T28 ✅)
     rule ID, payload carried only working context, both refusals exit 1
     with the right messages, regular .amod packed all 4 session/log
     files.
+- pack --for-git alias tests + reader scope decision LANDED and green
+  (Phase 7 final item ✅, D049): two new cli test funcs in
+  handoff_test.go — `TestPackForGitAlias` (top-level `pack --for-git`
+  through run(): exit 0, created/commit lines, manifest for_git true,
+  no .amod side-product) + `TestPackForGitAliasIncludeSessionsRefused`
+  (§19 encryption refusal fires through the alias, nothing created).
+  ZERO product code changed (pack already dispatched to
+  runHandoffCreate; usage's "same flags" already covered it).
+  - Tree-package reader (inspect/verify/restore on a directory) decided
+    OUT OF SCOPE for the MVP per D049: GOAL §29 requires git-handoff
+    CREATION only; RESTORE.md inside each package documents the manual
+    path; honesty notes in git-mode docs stay AS-IS. README limitations
+    (Phase 8) MUST list "tree packages restore manually".
+  - Binary smoke in /tmp passed: init → pack --for-git → tree with all
+    six members + payload, log/snapshot exclusions named, exit 0, empty
+    snapshots/.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -975,22 +990,30 @@ D046 iteration re-verified: all three homes + skills list unchanged from
 the 19:15 reading. D047 iteration: same — `~/.codex` mtime still 19:15,
 all three homes + skills list match baseline. D048 iteration: same —
 all three homes + skills list match baseline; the session-target
-research used read-only `ls` of the global homes, zero writes.)
+research used read-only `ls` of the global homes, zero writes.
+D049 iteration: same — `~/.codex` mtime still 19:15, all three homes +
+skills list match baseline.)
 
 ## Failing tests
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 7, next item: "pack --for-git alias (+ tests)". `pack` already
-dispatches to runHandoffCreate with the same parser, so `pack --for-git`
-WORKS today (D048) — the task is a test pinning it (FABLE_PLAN §19 names
-`agentmod pack --for-git` as a required command) plus any usage-text
-gap. Likely one small cli test (reuse TestHandoffCreateForGit's
-assertions through the `pack` top-level command) — consider batching it
-with the LAST Phase 7 item's scope decision (tree-package reader for
-inspect/verify/restore: NOT in GOAL §29; D047 says decide-and-record
-either way when reached; if skipped, record the decision and leave the
-honesty notes in the git-mode docs as-is).
+Phase 8, first item: "Scenario tests §27: proj00/proj01/proj02
+isolation matrix (mock binaries)" (T30). Read FABLE_PLAN §27.1–§27.4
+for the scenario definitions. Reuse, do not reinvent: the T11
+integration harness in internal/cli/integration_test.go
+(shellCases/sentinelEnv/envSection/countPathEntries/diffTrees +
+hook_test.go's fakeAgentmodBin/childEnv/lineAfter TestMain dispatch),
+restore_test.go's digestTree/diffDigests/pipelineForRestore, and
+install_test.go's makeGstackFixtureRepo. "Mock binaries" = fake
+claude/codex/opencode executables on the child PATH that print which
+config dir env vars they see — they must NOT be real installs (GOAL
+quality bar). Consider splitting: §27.1–.4 isolation matrix first
+(one slice), then §27.5 A→B round-trip + §27.6 git handoff scenario
+(second slice, much of which existing restore/gitpack tests already
+cover — check overlap before writing new code). Note for the README
+slice (Phase 8 docs): D049 requires the limitations list to mention
+manual tree-package restore.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

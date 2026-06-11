@@ -145,10 +145,14 @@ Add/split items freely; keep units small.
        snapshots already include sessions", with it the §19 encryption
        explanation — before any FS work; git-mode HANDOFF.md states the
        exclusion; .amod format provably still packs sessions; T28 ✅)
-- [ ] pack --for-git alias (+ tests)
-- [ ] handoff inspect/verify/restore accept a tree package directory
-      (drops the honesty notes D047 put in the git-mode HANDOFF/RESTORE
-       docs; not in GOAL §29 — decide scope when reached, record either way)
+- [x] pack --for-git alias (+ tests)
+      (D049: TestPackForGitAlias + TestPackForGitAliasIncludeSessionsRefused
+       pin the §19-required command through the top-level alias; zero
+       product code change needed)
+- [x] handoff inspect/verify/restore accept a tree package directory
+      (D049: decided OUT OF SCOPE for the MVP — GOAL §29 requires git
+       handoff CREATION only; honesty notes in the git-mode docs stay;
+       README limitations (Phase 8) must list manual tree restore)
 
 ## Phase 8 — docs + scenarios
 - [ ] Scenario tests §27: proj00/proj01/proj02 isolation matrix (mock binaries)

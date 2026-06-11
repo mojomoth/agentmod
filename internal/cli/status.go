@@ -128,27 +128,9 @@ func shellRoutingState(env Env, root string) string {
 // recentHandoff names the newest .amod under .agentmod/snapshots, or "none".
 // A missing or unreadable snapshots directory simply means no handoffs yet.
 func recentHandoff(agentmodDir string) string {
-	entries, err := os.ReadDir(filepath.Join(agentmodDir, layout.SnapshotsDir))
-	if err != nil {
+	files := listSnapshotFiles(filepath.Join(agentmodDir, layout.SnapshotsDir))
+	if len(files) == 0 {
 		return "none"
 	}
-	var newestName string
-	var newest time.Time
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".amod") {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		if newestName == "" || info.ModTime().After(newest) {
-			newest = info.ModTime()
-			newestName = e.Name()
-		}
-	}
-	if newestName == "" {
-		return "none"
-	}
-	return fmt.Sprintf("%s (created %s)", newestName, newest.Format("2006-01-02 15:04"))
+	return fmt.Sprintf("%s (created %s)", files[0].Name, files[0].ModTime.Format("2006-01-02 15:04"))
 }

@@ -74,7 +74,13 @@ Add/split items freely; keep units small.
        manifest `git` key omitted when no repo/binary; userinfo stripped
        from scheme:// remotes; dirty → refusal unless --allow-dirty;
        source_included always-false but explicit; T22 flips ✅)
-- [ ] inspect / verify / list / pack alias (+ tests)
+- [x] inspect / verify / list / pack alias (+ tests)
+      (D040: internal/handoff/read.go Open/Snapshot/Verify — restore builds
+       on them; inspect prints manifest + counts + REDACTION.md verbatim,
+       no extraction; verify re-hashes vs checksums.txt + inventory
+       cross-check, exit 3 on problems; list = snapshots/ newest-first,
+       status.recentHandoff refactored onto the shared lister; pack ≡
+       handoff create, unpack = stub until Phase 6; T23 ✅)
 
 ## Phase 6 — restore
 - [ ] validation: schema version, checksums, zip-slip, absolute paths, symlinks (+ malicious fixtures)

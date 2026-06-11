@@ -958,3 +958,49 @@ this iteration finished and tested it.
   on unborn dirty repo, clean repo manifest w/ redacted remote) +
   TestCreateManifestGitState in internal/handoff. Binary smoke in /tmp:
   all four shapes verified incl. manifest JSON.
+
+## D040 — 2026-06-11 — T23: inspect / verify / list / pack alias shape
+
+Read side of .amod lives in new `internal/handoff/read.go`
+(`Open(path) (*Snapshot, error)` + `(*Snapshot).Verify() *VerifyResult`);
+cli grew runHandoffInspect/runHandoffVerify/runHandoffList + the `pack`
+and `unpack` top-level aliases. Read D034–D037+this before touching
+snapshot read/restore code — Phase 6 restore MUST build on Open/Verify.
+
+- **Open contract**: succeeds on any structurally complete snapshot —
+  zip readable, all six §21 root members present (missing ones named in
+  the error), manifest/inventory parseable, REDACTION.md readable. It
+  does NOT hash anything and does NOT gate on schema version: the caller
+  decides (inspect prints a WARNING line for newer schemas, Verify
+  records a problem, restore will hard-refuse). Exposes Manifest,
+  Inventory, Redaction bytes, total member count, payload dir count.
+- **Verify contract**: re-hashes every content-bearing member (everything
+  except dir entries and checksums.txt itself) against checksums.txt,
+  then cross-checks inventory↔payload both directions: presence, size,
+  sha256, mode, and symlink-target-hashes-to-recorded-sha (content IS the
+  target per D034, so no second read needed). Read failures become
+  problems, never aborts — one bad member must not hide the rest.
+  Problems are human sentences in detection order; empty = clean.
+- **Exit codes** (cli): verify problems AND structurally-invalid snapshot
+  → ExitValidation (3, the §3 verification-failure code); a path that
+  cannot even be stat'ed → ExitError (1) — a typo is not a validation
+  verdict. inspect always exits 0/1 (it informs, verify judges).
+- **Inspect output**: manifest fields, git line (reuses gitIdentity +
+  redacted remote; "no metadata recorded" when the key is absent), member/
+  payload counts, then REDACTION.md verbatim under a `--- REDACTION.md ---`
+  separator — the report IS the excluded/findings summary; re-parsing it
+  into a second format would just drift. No project required for
+  inspect/verify: recipients have a file, not a project.
+- **list**: project-required (exit 2), names *.amod in
+  .agentmod/snapshots/ newest-first (mtime desc, ties name asc — matches
+  the old recentHandoff pick), with size + mtime. status.go's
+  recentHandoff now delegates to the shared cli listSnapshotFiles helper.
+  Snapshots written elsewhere via --output are outside list's view by
+  design (documented in the function comment).
+- **Aliases** (FABLE_PLAN §11): `agentmod pack` dispatches straight to
+  runHandoffCreate (same flags, §19's `pack --for-git` lands with
+  Phase 7); `agentmod unpack` is an explicit not-implemented stub naming
+  'handoff restore' so it reads as planned. Usage text lists both.
+- **Test helper**: read_test.go's rewriteSnapshot (mutate/drop/add members
+  + optional checksums regeneration so ONLY the deliberate inconsistency
+  remains) is the tamper harness for T24's malicious restore fixtures.

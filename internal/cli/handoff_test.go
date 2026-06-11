@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -242,9 +243,10 @@ func TestHandoffArgumentValidation(t *testing.T) {
 		{"unsupported flag", []string{"create", "--frobnicate"}, `unsupported argument "--frobnicate"`},
 		{"output without path", []string{"create", "--output"}, "--output requires a path"},
 		{"restore not implemented", []string{"restore"}, "handoff restore is not implemented yet"},
-		{"inspect not implemented", []string{"inspect"}, "handoff inspect is not implemented yet"},
-		{"verify not implemented", []string{"verify"}, "handoff verify is not implemented yet"},
-		{"list not implemented", []string{"list"}, "handoff list is not implemented yet"},
+		{"inspect without path", []string{"inspect"}, "handoff inspect takes exactly one argument"},
+		{"inspect extra args", []string{"inspect", "a.amod", "b.amod"}, "handoff inspect takes exactly one argument"},
+		{"verify without path", []string{"verify"}, "handoff verify takes exactly one argument"},
+		{"list with args", []string{"list", "extra"}, "handoff list takes no arguments"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -376,6 +378,240 @@ func TestHandoffCreateCleanRepoRecordsGitState(t *testing.T) {
 	}
 	if m.Git.RemoteURL != "https://example.com/org/repo.git" {
 		t.Errorf("manifest remote = %q, want credentials stripped", m.Git.RemoteURL)
+	}
+}
+
+func TestHandoffInspectOutput(t *testing.T) {
+	requireGit(t) // without git the omitted-metadata note differs
+	root := makeProject(t, config.Default())
+	output := filepath.Join(t.TempDir(), "snap.amod")
+	if code, _, stderr := runHandoffForTest(t, fakeEnv(root, nil), "create", "--output", output); code != ExitOK {
+		t.Fatalf("create failed: %s", stderr)
+	}
+
+	code, stdout, stderr := runHandoffForTest(t, fakeEnv(root, nil), "inspect", output)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	wantContains(t, "stdout", stdout,
+		"Snapshot: "+output,
+		"schema version: 1",
+		"created:        "+fakeNow.Format(time.RFC3339)+" by agentmod "+Version,
+		"git:            no metadata recorded",
+		"members:",
+		"payload:",
+		"--- REDACTION.md ---",
+		"# Redaction report",
+	)
+	// Inspect must not extract anything next to the snapshot.
+	entries, err := os.ReadDir(filepath.Dir(output))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("inspect created files next to the snapshot: %d entries", len(entries))
+	}
+}
+
+func TestHandoffInspectShowsGitState(t *testing.T) {
+	requireGit(t)
+	root := makeProject(t, config.Default())
+	runGitFixture(t, root, "init", "--quiet", "-b", "main")
+	runGitFixture(t, root, "add", "-A")
+	runGitFixture(t, root, "commit", "--quiet", "-m", "fixture")
+	runGitFixture(t, root, "remote", "add", "origin", "https://user:sk-FAKE-fixture@example.com/org/repo.git")
+	output := filepath.Join(t.TempDir(), "snap.amod")
+	if code, _, stderr := runHandoffForTest(t, fakeEnv(root, nil), "create", "--output", output); code != ExitOK {
+		t.Fatalf("create failed: %s", stderr)
+	}
+
+	code, stdout, stderr := runHandoffForTest(t, fakeEnv(root, nil), "inspect", output)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	wantContains(t, "stdout", stdout, "git:            branch main @ ", ", clean", ", remote https://example.com/org/repo.git")
+	if strings.Contains(stdout, "sk-FAKE-fixture") {
+		t.Errorf("inspect reproduced remote credentials:\n%s", stdout)
+	}
+}
+
+func TestHandoffInspectMissingFile(t *testing.T) {
+	code, _, stderr := runHandoffForTest(t, fakeEnv(t.TempDir(), nil), "inspect", filepath.Join(t.TempDir(), "nope.amod"))
+	if code != ExitError {
+		t.Fatalf("exit = %d, want %d", code, ExitError)
+	}
+	wantContains(t, "stderr", stderr, "not a readable .amod snapshot")
+}
+
+func TestHandoffVerifyOK(t *testing.T) {
+	root := makeProject(t, config.Default())
+	output := filepath.Join(t.TempDir(), "snap.amod")
+	if code, _, stderr := runHandoffForTest(t, fakeEnv(root, nil), "create", "--output", output); code != ExitOK {
+		t.Fatalf("create failed: %s", stderr)
+	}
+	// Verify works anywhere — a recipient has the file, not the project.
+	code, stdout, stderr := runHandoffForTest(t, fakeEnv(t.TempDir(), nil), "verify", output)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	wantContains(t, "stdout", stdout, "OK: "+output, "verified ", "checksums.txt; inventory matches the payload")
+}
+
+func TestHandoffVerifyTamperedMember(t *testing.T) {
+	root := makeProject(t, config.Default())
+	output := filepath.Join(t.TempDir(), "snap.amod")
+	if code, _, stderr := runHandoffForTest(t, fakeEnv(root, nil), "create", "--output", output); code != ExitOK {
+		t.Fatalf("create failed: %s", stderr)
+	}
+	tampered := filepath.Join(t.TempDir(), "tampered.amod")
+	victim := "payload/.agentmod/agentmod.toml"
+	tamperSnapshotMember(t, output, tampered, victim, []byte("schema_version = 9\n"))
+
+	code, _, stderr := runHandoffForTest(t, fakeEnv(t.TempDir(), nil), "verify", tampered)
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d", code, ExitValidation)
+	}
+	wantContains(t, "stderr", stderr, "FAILED", "checksum mismatch for "+victim)
+}
+
+func TestHandoffVerifyNotASnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "garbage.amod")
+	if err := os.WriteFile(path, []byte("not a zip\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, _, stderr := runHandoffForTest(t, fakeEnv(t.TempDir(), nil), "verify", path)
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d", code, ExitValidation)
+	}
+	wantContains(t, "stderr", stderr, "FAILED", "not a readable .amod snapshot")
+}
+
+func TestHandoffVerifyMissingFile(t *testing.T) {
+	code, _, stderr := runHandoffForTest(t, fakeEnv(t.TempDir(), nil), "verify", filepath.Join(t.TempDir(), "nope.amod"))
+	if code != ExitError {
+		t.Fatalf("exit = %d, want %d (a typo'd path is not a validation verdict)", code, ExitError)
+	}
+	wantContains(t, "stderr", stderr, "no such file")
+}
+
+func TestHandoffListEmpty(t *testing.T) {
+	root := makeProject(t, config.Default())
+	code, stdout, stderr := runHandoffForTest(t, fakeEnv(root, nil), "list")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	wantContains(t, "stdout", stdout, "No handoff snapshots in ", "agentmod handoff create")
+}
+
+func TestHandoffListNewestFirst(t *testing.T) {
+	root := makeProject(t, config.Default())
+	snapsDir := filepath.Join(root, ".agentmod", "snapshots")
+	env := fakeEnv(root, nil)
+	for _, name := range []string{"older.amod", "newer.amod"} {
+		code, _, stderr := runHandoffForTest(t, env, "create", "--output", filepath.Join(snapsDir, name))
+		if code != ExitOK {
+			t.Fatalf("create %s failed: %s", name, stderr)
+		}
+	}
+	older := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
+	newer := time.Date(2026, 6, 11, 9, 30, 0, 0, time.UTC)
+	if err := os.Chtimes(filepath.Join(snapsDir, "older.amod"), older, older); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(snapsDir, "newer.amod"), newer, newer); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runHandoffForTest(t, env, "list")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	wantContains(t, "stdout", stdout,
+		"Handoff snapshots in "+snapsDir+" (newest first):",
+		"newer.amod", "older.amod", " bytes  modified ",
+	)
+	if iNew, iOld := strings.Index(stdout, "newer.amod"), strings.Index(stdout, "older.amod"); iNew > iOld {
+		t.Errorf("newer.amod listed after older.amod:\n%s", stdout)
+	}
+}
+
+func TestHandoffListOutsideProject(t *testing.T) {
+	code, _, stderr := runHandoffForTest(t, fakeEnv(t.TempDir(), nil), "list")
+	if code != ExitNotInProject {
+		t.Fatalf("exit = %d, want %d", code, ExitNotInProject)
+	}
+	wantContains(t, "stderr", stderr, "requires an agentmod project", "agentmod init")
+}
+
+func TestPackAliasCreates(t *testing.T) {
+	// `agentmod pack` is `agentmod handoff create` with the same flags
+	// (FABLE_PLAN §11 Alias).
+	root := makeProject(t, config.Default())
+	output := filepath.Join(t.TempDir(), "packed.amod")
+	var out, errBuf bytes.Buffer
+	code := run([]string{"pack", "--output", output}, &out, &errBuf, fakeEnv(root, nil))
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, errBuf.String())
+	}
+	if _, err := os.Stat(output); err != nil {
+		t.Fatalf("pack produced no snapshot: %v", err)
+	}
+	wantContains(t, "stdout", out.String(), "Created handoff snapshot: "+output)
+}
+
+func TestUnpackNotImplemented(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	code := run([]string{"unpack"}, &out, &errBuf, fakeEnv(t.TempDir(), nil))
+	if code != ExitError {
+		t.Fatalf("exit = %d, want %d", code, ExitError)
+	}
+	wantContains(t, "stderr", errBuf.String(), "unpack", "handoff restore", "not implemented yet")
+}
+
+// tamperSnapshotMember copies the zip at src to dst, replacing the named
+// member's content and leaving everything else — including checksums.txt —
+// untouched, so verify must flag the mismatch.
+func tamperSnapshotMember(t *testing.T, src, dst, name string, content []byte) {
+	t.Helper()
+	zr, err := zip.OpenReader(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	zw := zip.NewWriter(out)
+	for _, f := range zr.File {
+		hdr := &zip.FileHeader{Name: f.Name, Method: zip.Deflate, Modified: f.Modified}
+		hdr.SetMode(f.FileInfo().Mode())
+		w, err := zw.CreateHeader(hdr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		data := content
+		if f.Name != name {
+			rc, err := f.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err = io.ReadAll(rc)
+			rc.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := w.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 

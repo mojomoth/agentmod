@@ -51,7 +51,13 @@ Commands:
               private-key material refuses creation unless --allow-findings;
               a dirty git worktree refuses unless --allow-dirty; default
               output is .agentmod/snapshots/<project>-<timestamp>.amod;
-              restore/inspect/verify/list are not implemented yet)
+              handoff inspect FILE prints the manifest and redaction
+              report without extracting; handoff verify FILE re-hashes
+              every member against its checksums and exits 3 on mismatch;
+              handoff list names the snapshots in .agentmod/snapshots/;
+              restore is not implemented yet)
+  pack       alias of 'handoff create' (same flags)
+  unpack     alias of 'handoff restore' (not implemented yet)
   version    print version and exit
   help       show this help
 
@@ -90,6 +96,11 @@ func run(args []string, stdout, stderr io.Writer, env Env) int {
 		return runInstall(args[1:], stdout, stderr, env)
 	case "handoff":
 		return runHandoff(args[1:], stdout, stderr, env)
+	case "pack":
+		return runHandoffCreate(args[1:], stdout, stderr, env)
+	case "unpack":
+		fmt.Fprintf(stderr, "agentmod: unpack (alias of 'agentmod handoff restore') is not implemented yet\n")
+		return ExitError
 	case "version", "--version":
 		fmt.Fprintf(stdout, "agentmod %s\n", Version)
 		return ExitOK

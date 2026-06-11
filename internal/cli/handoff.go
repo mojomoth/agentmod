@@ -4,8 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/agentmod/agentmod/internal/handoff"
@@ -14,8 +17,8 @@ import (
 )
 
 // runHandoff dispatches `agentmod handoff <subcommand>` (FABLE_PLAN §18).
-// Only create is implemented so far; the others are named explicitly so
-// users learn they are planned rather than mistyped.
+// restore is named explicitly so users learn it is planned (Phase 6)
+// rather than mistyped.
 func runHandoff(args []string, stdout, stderr io.Writer, env Env) int {
 	if len(args) == 0 {
 		fmt.Fprintf(stderr, "agentmod: handoff requires a subcommand (try 'agentmod handoff create')\n")
@@ -24,7 +27,13 @@ func runHandoff(args []string, stdout, stderr io.Writer, env Env) int {
 	switch args[0] {
 	case "create":
 		return runHandoffCreate(args[1:], stdout, stderr, env)
-	case "restore", "inspect", "verify", "list":
+	case "inspect":
+		return runHandoffInspect(args[1:], stdout, stderr)
+	case "verify":
+		return runHandoffVerify(args[1:], stdout, stderr)
+	case "list":
+		return runHandoffList(args[1:], stdout, stderr, env)
+	case "restore":
 		fmt.Fprintf(stderr, "agentmod: handoff %s is not implemented yet\n", args[0])
 		return ExitError
 	}
@@ -147,4 +156,159 @@ func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 	}
 	fmt.Fprintf(stdout, "Verify or restore it on the target machine with 'agentmod handoff' (restore lands in a later release).\n")
 	return ExitOK
+}
+
+// runHandoffInspect implements `agentmod handoff inspect <file.amod>`:
+// print the manifest, member/payload counts, and the snapshot's own
+// redaction report without extracting anything to disk. It works anywhere —
+// inspecting a received snapshot must not require a project.
+func runHandoffInspect(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintf(stderr, "agentmod: handoff inspect takes exactly one argument: the .amod path (see 'agentmod handoff list')\n")
+		return ExitError
+	}
+	snap, err := handoff.Open(args[0])
+	if err != nil {
+		fmt.Fprintf(stderr, "agentmod: %v\n", err)
+		return ExitError
+	}
+	defer snap.Close()
+
+	m := snap.Manifest
+	fmt.Fprintf(stdout, "Snapshot: %s\n", snap.Path)
+	fmt.Fprintf(stdout, "  schema version: %d\n", m.SchemaVersion)
+	if m.SchemaVersion > handoff.SchemaVersion {
+		fmt.Fprintf(stdout, "  WARNING: newer than this build supports (%d); upgrade agentmod before restoring\n", handoff.SchemaVersion)
+	}
+	fmt.Fprintf(stdout, "  created:        %s by agentmod %s (%s)\n", m.CreatedAt, m.AgentmodVersion, m.Platform)
+	switch {
+	case m.Git == nil:
+		fmt.Fprintf(stdout, "  git:            no metadata recorded (created outside a git repository or without git)\n")
+	case m.Git.Dirty:
+		fmt.Fprintf(stdout, "  git:            %s, DIRTY at create time (%s)%s\n", gitIdentity(m.Git), m.Git.StatusSummary, gitRemoteSuffix(m.Git))
+	default:
+		fmt.Fprintf(stdout, "  git:            %s, clean%s\n", gitIdentity(m.Git), gitRemoteSuffix(m.Git))
+	}
+	var payloadBytes int64
+	for _, e := range snap.Inventory.Files {
+		payloadBytes += e.Size
+	}
+	fmt.Fprintf(stdout, "  members:        %d zip members; payload: %d files, %d bytes, %d directories\n",
+		snap.Members, len(snap.Inventory.Files), payloadBytes, snap.PayloadDirs)
+	fmt.Fprintf(stdout, "\n--- %s ---\n%s", handoff.RedactionName, snap.Redaction)
+	return ExitOK
+}
+
+// gitRemoteSuffix renders the manifest's redacted remote, if one was
+// recorded, for inspect's git line.
+func gitRemoteSuffix(st *handoff.GitState) string {
+	if st.RemoteURL == "" {
+		return ""
+	}
+	return ", remote " + st.RemoteURL
+}
+
+// runHandoffVerify implements `agentmod handoff verify <file.amod>`:
+// re-hash every content-bearing member against checksums.txt and
+// cross-check the inventory, reading the zip only — nothing is written.
+// Integrity problems (including an unreadable snapshot format) exit 3;
+// a path that cannot be read at all exits 1.
+func runHandoffVerify(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintf(stderr, "agentmod: handoff verify takes exactly one argument: the .amod path (see 'agentmod handoff list')\n")
+		return ExitError
+	}
+	if _, err := os.Stat(args[0]); err != nil {
+		fmt.Fprintf(stderr, "agentmod: %v\n", err)
+		return ExitError
+	}
+	snap, err := handoff.Open(args[0])
+	if err != nil {
+		fmt.Fprintf(stderr, "agentmod: handoff verify: %s FAILED:\n  %v\n", args[0], err)
+		return ExitValidation
+	}
+	defer snap.Close()
+
+	res := snap.Verify()
+	if len(res.Problems) > 0 {
+		fmt.Fprintf(stderr, "agentmod: handoff verify: %s FAILED:\n", snap.Path)
+		for _, p := range res.Problems {
+			fmt.Fprintf(stderr, "  %s\n", p)
+		}
+		return ExitValidation
+	}
+	fmt.Fprintf(stdout, "OK: %s\n", snap.Path)
+	fmt.Fprintf(stdout, "  verified %d members against %s; inventory matches the payload\n", res.Checked, handoff.ChecksumsName)
+	return ExitOK
+}
+
+// runHandoffList implements `agentmod handoff list`: name every .amod in
+// this project's .agentmod/snapshots/, newest first. Snapshots written
+// elsewhere via --output are outside its view by design.
+func runHandoffList(args []string, stdout, stderr io.Writer, env Env) int {
+	if len(args) != 0 {
+		fmt.Fprintf(stderr, "agentmod: handoff list takes no arguments\n")
+		return ExitError
+	}
+	cwd, err := env.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "agentmod: %v\n", err)
+		return ExitError
+	}
+	proj, err := project.Discover(cwd)
+	if errors.Is(err, project.ErrNotFound) {
+		fmt.Fprintf(stderr, "agentmod: handoff list requires an agentmod project; run 'agentmod init' first (%v)\n", err)
+		return ExitNotInProject
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "agentmod: %v\n", err)
+		return ExitError
+	}
+	dir := filepath.Join(proj.AgentmodDir, layout.SnapshotsDir)
+	files := listSnapshotFiles(dir)
+	if len(files) == 0 {
+		fmt.Fprintf(stdout, "No handoff snapshots in %s (create one with 'agentmod handoff create').\n", dir)
+		return ExitOK
+	}
+	fmt.Fprintf(stdout, "Handoff snapshots in %s (newest first):\n", dir)
+	for _, f := range files {
+		fmt.Fprintf(stdout, "  %s  %d bytes  modified %s\n", f.Name, f.Size, f.ModTime.Format("2006-01-02 15:04"))
+	}
+	return ExitOK
+}
+
+// snapshotFile is one .amod in the snapshots directory.
+type snapshotFile struct {
+	Name    string
+	Size    int64
+	ModTime time.Time
+}
+
+// listSnapshotFiles returns the .amod files in dir sorted newest first
+// (ties alphabetically). A missing or unreadable directory simply means no
+// snapshots yet — status and list both treat that as an answer, not an
+// error.
+func listSnapshotFiles(dir string) []snapshotFile {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var files []snapshotFile
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".amod") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, snapshotFile{Name: e.Name(), Size: info.Size(), ModTime: info.ModTime()})
+	}
+	sort.Slice(files, func(i, j int) bool {
+		if !files[i].ModTime.Equal(files[j].ModTime) {
+			return files[i].ModTime.After(files[j].ModTime)
+		}
+		return files[i].Name < files[j].Name
+	})
+	return files
 }

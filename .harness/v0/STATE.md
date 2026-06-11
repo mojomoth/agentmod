@@ -1,7 +1,7 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 5 slice 5 — git state metadata
-+ --allow-dirty gate, D039)
+Last updated: 2026-06-11 (iteration: Phase 5 slice 6 — handoff
+inspect/verify/list + pack/unpack aliases, D040; Phase 5 COMPLETE)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
@@ -9,11 +9,12 @@ Last updated: 2026-06-11 (iteration: Phase 5 slice 5 — git state metadata
   first-session diagnosis). Phase 3 COMPLETE (six doctor slices + guard
   claude-bash + guard wiring T17 + auth copy-on-consent T15). Phase 4
   COMPLETE (install gstack clone + --force + pollution verification +
-  distinct error reporting; T18 ✅). Phase 5 IN PROGRESS: slice 1 (.amod
+  distinct error reporting; T18 ✅). Phase 5 COMPLETE: slice 1 (.amod
   writer) + slice 2 (default exclusion engine, T20 ✅) + slice 3 (secret
   scan + REDACTION.md, T21 ✅) + slice 4 (HANDOFF.md + RESTORE.md docs,
   D037; T19 ✅) + slice 5 (git state metadata + --allow-dirty, D039;
-  T22 ✅) landed; next is inspect/verify/list + pack alias.
+  T22 ✅) + slice 6 (inspect/verify/list + pack alias, D040; T23 ✅).
+  Next phase: Phase 6 restore.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -657,6 +658,34 @@ Last updated: 2026-06-11 (iteration: Phase 5 slice 5 — git state metadata
     TestCreateManifestGitState (internal/handoff). cli usage text grew
     --allow-dirty. Binary smoke in /tmp passed (all four shapes incl.
     manifest JSON via unzip -p).
+- handoff inspect/verify/list + pack/unpack aliases LANDED and green
+  (Phase 5 slice 6 ✅, D040, T23 ✅): new `internal/handoff/read.go`
+  (`Open` → `Snapshot{Manifest, Inventory, Redaction, Members,
+  PayloadDirs}` + `(*Snapshot).Verify() *VerifyResult`); cli grew
+  runHandoffInspect/Verify/List, the shared `listSnapshotFiles` lister
+  (status.recentHandoff refactored onto it — same pick on mtime ties),
+  and top-level `pack` (≡ handoff create, same flags) + `unpack`
+  (explicit stub until Phase 6). Read D040 (+D034) before touching
+  read/restore code — restore MUST build on Open/Verify.
+  - Open: structural gate only (zip + six §21 root members + parseable
+    manifest/inventory), NO hashing, NO schema-version gate (caller
+    decides: inspect warns, Verify records a problem, restore will
+    refuse). Verify: re-hash all content members vs checksums.txt +
+    inventory↔payload cross-check both directions (presence/size/sha/
+    mode/symlink-target-hash); read failures are problems, never aborts.
+  - Exit codes: verify problems OR invalid snapshot → 3 (ExitValidation);
+    unstat-able path → 1 (typo ≠ validation verdict); inspect informs
+    (0/1, prints REDACTION.md verbatim — it IS the redaction summary).
+    inspect/verify need NO project; list requires one (exit 2).
+  - Tests: 9 funcs in new internal/handoff/read_test.go (incl. the
+    rewriteSnapshot mutate/drop/add/fix-checksums tamper helper — REUSE
+    for T24 malicious restore fixtures) + 12 new cli funcs + reworked
+    arg-validation rows ("not implemented" rows now only restore).
+    Binary smoke in /tmp passed: create→list→inspect (git line + redacted
+    remote)→verify exit 0→pack→garbage verify exit 3→unpack stub exit 1.
+  - Smoke gotcha: shell redirects INTO the repo (`> create.out`) make the
+    worktree dirty and trip the D039 gate — redirect smoke output outside
+    the project.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -693,22 +722,24 @@ Later same day: `~/.codex` mtime 6월 11 02:28, same verdict. And again
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 5, final item: "inspect / verify / list / pack alias (+ tests)".
-Re-read FABLE_PLAN §18 ("Handoff inspect / verify / list") + §21 +
-IMPLEMENTATION_PLAN §12 + D034 before coding. Notes:
-- The three subcommands currently answer "not implemented yet" (exit 1)
-  in runHandoff — replace those stubs. `pack` is an ALIAS for create
-  (FABLE_PLAN §11 Alias section; check exact alias semantics there —
-  unpack is restore's alias and stays a stub until Phase 6).
-- inspect: print manifest (incl. git state when present), member/payload
-  counts, excluded/redaction summary WITHOUT extracting to disk; verify:
-  re-hash every content-bearing member against checksums.txt + inventory
-  (zip read only, no writes); list: snapshots in .agentmod/snapshots/
-  (status.go's "Recent handoff" mtime probe is related — reuse/extract).
-- Reuse readSnapshotManifest (cli handoff_test.go) shape for production
-  reading; consider moving zip-reading helpers into internal/handoff
-  (Open/Inspect functions) so restore (Phase 6) builds on them.
-- Slice it if large: inspect+list first, verify second.
+Phase 6, first item: "validation: schema version, checksums, zip-slip,
+absolute paths, symlinks (+ malicious fixtures)". Re-read FABLE_PLAN §18
+("Handoff restore"), §21 Critical list, §22 (portability), §25 (security),
+IMPLEMENTATION_PLAN §12 restore pipeline, and D034+D040 before coding.
+Notes:
+- Build restore's validation on handoff.Open + (*Snapshot).Verify (D040) —
+  schema-version hard refusal (> SchemaVersion), checksum verification,
+  THEN per-entry path validation: relative, cleaned, no `..` escape, no
+  absolute paths, symlink targets must resolve inside the payload, never
+  write outside .agentmod/ (§21: never .ssh/.aws/.docker/.git).
+- Malicious fixtures: read_test.go's rewriteSnapshot helper (mutate/drop/
+  add members + optional checksums regeneration) builds zip-slip /
+  absolute-path / escaping-symlink archives without hand-rolling zips.
+- This slice can be validation-only (a `validateSnapshot` /
+  `planExtraction` layer + tests) — actual extraction, backup, and the
+  post-restore doctor are the following TASKS items. Keep `handoff
+  restore` answering not-implemented until extraction lands, or wire a
+  validate-only failure path; decide and record.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

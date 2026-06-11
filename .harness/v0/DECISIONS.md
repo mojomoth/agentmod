@@ -1101,3 +1101,55 @@ slice consumes this function and must not invent its own backup handling.
   permanent pattern for an artifact that usually never exists. The
   post-restore-notices slice should also tell the user to delete the
   backup once the restore is verified.
+
+## D043 — 2026-06-11 — Restore extraction: (*Snapshot).Restore + `handoff restore` cli (Phase 6 slice 3)
+
+`internal/handoff/restore.go` (`(*Snapshot).Restore(projectRoot, plan,
+now) (*RestoreResult, error)` + extractPlan/writeFileMember) and
+`runHandoffRestore` in internal/cli/handoff.go. The library half was
+written by a prior iteration that stopped before tests/commit; this
+iteration verified it sound, tested it, and wired the cli (T06
+precedent). Read D034+D040+D041+D042+this before touching restore code.
+
+- **cli pipeline + exit codes**: restore REQUIRES a project (RESTORE.md's
+  packed step order is install → init → restore → doctor; ErrNotFound →
+  exit 2). Then: unstat-able path → exit 1 (typo ≠ validation verdict,
+  D040); Open failure / Verify problems / PlanRestore problems → exit 3,
+  every problem listed — all BEFORE anything on disk moves (a refused
+  restore provably creates no backup; tested from the cli). Extraction
+  failure after that → exit 1 with the rollback statement.
+- **Extraction order** (D041): MkdirAll Dirs at 0700 first (restrictive so
+  every later write succeeds), then Files, then Links LAST; recorded dir
+  modes are applied deepest-first AFTER content. Files = O_CREATE|O_EXCL
+  + explicit Chmod (umask cannot strip recorded exec bits; O_EXCL means
+  any collision in the fresh tree = hostile archive → fail, never
+  overwrite — proven via a duplicate-plan-entry test). Members are read
+  through the zip handle Open established, so a snapshot living inside
+  the very `.agentmod/snapshots/` being renamed away restores fine
+  (POSIX rename keeps open fds; tested).
+- **Rollback is automatic** (D042 settled "rename back"): on any
+  extraction failure RemoveAll the partial `.agentmod`, rename the backup
+  back, return one error naming cause + "rolled back"; if the rollback
+  itself fails the error names BOTH the partial tree and the backup so
+  nothing is silently lost. Tree-digest tests prove byte-exact rollback.
+- **Post-extract**: layout.Subdirs() recreated (snapshots/ never travels
+  — structurally excluded at create; doctor finds a complete tree,
+  smoke-verified "all 6 directories present").
+- **Gitignore (D042 implemented)**: `ensureGitignore` generalized to
+  `(dir, entry)` (covers-check derives the 4 spellings from the entry;
+  init passes gitignoreEntry — zero behavior change, no test churn). New
+  `gitignoreBackupEntry = handoff.BackupPrefix + "*/"`, ensured ONLY when
+  a backup was actually created. A gitignore failure after a successful
+  restore is a stderr WARNING, exit stays 0 — the restore itself
+  succeeded; the next create's dirty gate surfaces the stray dir.
+- **unpack stays a stub** deliberately: TASKS assigns the alias to the
+  post-restore-notices slice; the stub message ("alias of 'agentmod
+  handoff restore'") remains true and points at the real command.
+- **Docs honesty**: HANDOFF.md's and RESTORE.md's "does not implement
+  restore yet" notes removed (renderers + docs_test anchors); create's
+  closing stdout line now points at verify/restore.
+- **Known wrinkle (not this slice's bug)**: init-before-`git init`
+  projects have no `.agentmod/` gitignore entry (D014 skip); a later
+  in-repo restore then creates `.gitignore` containing only the backup
+  pattern. Re-running init fixes it (idempotent, D014's documented
+  remedy). The post-restore-notices slice may mention it.

@@ -8,9 +8,8 @@ import (
 
 // TestCreateHandoffDocContents proves HANDOFF.md lands in the snapshot and
 // carries the §12 trio: what this is (project, timestamp, version,
-// platform, payload size), how to restore (incl. the honest restore-not-
-// implemented note), and what's missing (exclusion + scan summary and the
-// D035 gstack/.git and node/bin notes).
+// platform, payload size), how to restore, and what's missing (exclusion +
+// scan summary and the D035 gstack/.git and node/bin notes).
 func TestCreateHandoffDocContents(t *testing.T) {
 	root := mkFixtureProject(t)
 	output := filepath.Join(t.TempDir(), "snap.amod")
@@ -25,7 +24,6 @@ func TestCreateHandoffDocContents(t *testing.T) {
 		"Created 2026-06-11T12:30:45Z by agentmod test-version on testos/testarch.",
 		"- 5 files (",
 		"agentmod handoff restore",
-		"the agentmod build that created this snapshot (test-version) does not\nimplement restore yet",
 		// The fixture's pre-existing snapshot triggers exactly the
 		// structural snapshots-output exclusion.
 		"- 1 entry was excluded by the redaction policy",
@@ -38,6 +36,10 @@ func TestCreateHandoffDocContents(t *testing.T) {
 		if !strings.Contains(doc, want) {
 			t.Errorf("HANDOFF.md missing %q\n--- document ---\n%s", want, doc)
 		}
+	}
+	// Restore is implemented now; the old honesty note must be gone.
+	if strings.Contains(doc, "does not\nimplement restore yet") {
+		t.Errorf("HANDOFF.md still carries the restore-not-implemented note\n--- document ---\n%s", doc)
 	}
 }
 
@@ -55,7 +57,7 @@ func TestCreateRestoreDocContents(t *testing.T) {
 	for _, want := range []string{
 		"# Restoring this snapshot",
 		"Written by agentmod test-version at create time.",
-		"does not implement\nrestore yet",
+		"`agentmod handoff restore`\nfollows these steps",
 		"`agentmod init`",
 		"`agentmod handoff restore <file>.amod`",
 		"never executes anything from the snapshot",

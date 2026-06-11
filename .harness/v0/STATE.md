@@ -1,7 +1,7 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 6 slice 2 — pre-restore backup
-BackupAgentmod, D042; T25 🟡)
+Last updated: 2026-06-11 (iteration: Phase 6 slice 3 — restore extraction
+(*Snapshot).Restore + `handoff restore` cli, D043; T24 ✅ T25 ✅ T26 🟡)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
@@ -15,8 +15,10 @@ BackupAgentmod, D042; T25 🟡)
   D037; T19 ✅) + slice 5 (git state metadata + --allow-dirty, D039;
   T22 ✅) + slice 6 (inspect/verify/list + pack alias, D040; T23 ✅).
   Phase 6 IN PROGRESS: slice 1 (restore validation layer PlanRestore,
-  D041; T24 🟡) + slice 2 (pre-restore backup BackupAgentmod, D042;
-  T25 🟡) done; next is the extraction slice.
+  D041; T24) + slice 2 (pre-restore backup BackupAgentmod, D042; T25) +
+  slice 3 (extraction: Restore + `handoff restore` cli, D043; T24+T25 ✅,
+  T26 🟡) done; remaining: portability slice, then post-restore
+  notices/doctor + unpack alias.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -734,6 +736,48 @@ BackupAgentmod, D042; T25 🟡)
     no-op, collision refusal w/ source+occupant untouched, stray-file,
     UTC stamp under KST clock). Library-only slice: restore/unpack stubs
     unchanged, no cli surface change, no binary smoke needed.
+- restore extraction LANDED and green (Phase 6 slice 3 ✅, D043, T24 ✅
+  T25 ✅ T26 🟡): `internal/handoff/restore.go` (`(*Snapshot).Restore` +
+  extractPlan/writeFileMember — the library half was a prior iteration's
+  orphaned uncommitted work, verified sound and adopted per the T06
+  precedent) + `runHandoffRestore` in cli/handoff.go, wired into the
+  handoff dispatcher + usage. Read D034+D040–D043 before touching restore
+  code.
+  - cli pipeline: project required (exit 2, RESTORE.md step order) →
+    Stat (typo → exit 1) → Open/Verify/PlanRestore (any problem → exit 3,
+    all listed) — all BEFORE any disk move (refused restores provably
+    create no backup, cli-tested) → Restore = BackupAgentmod + extract
+    Dirs(0700, recorded modes chmodded deepest-first after content) →
+    Files(O_CREATE|O_EXCL + explicit Chmod, umask-proof exec bits) →
+    Links last. Extraction failure → automatic rollback (RemoveAll
+    partial + rename backup back), error says "rolled back"; rollback
+    failure names BOTH paths. layout.Subdirs() recreated after extract
+    (snapshots/ never travels) — doctor reports a complete tree.
+  - ensureGitignore GENERALIZED to (dir, entry) (covers-check derives the
+    4 spellings from the entry; init passes gitignoreEntry, zero behavior
+    change). `gitignoreBackupEntry` = `.agentmod.backup-*/`, ensured only
+    when a backup was created; gitignore failure after successful restore
+    = stderr warning, exit stays 0. unpack deliberately STILL a stub
+    (TASKS assigns the alias to the notices slice; its message stays
+    true). docs.go honesty: "does not implement restore yet" notes
+    REMOVED from both renderers (+ docs_test anchors updated); create's
+    closing line now points at verify/restore.
+  - Tests: 7 funcs in new internal/handoff/restore_test.go
+    (digestTree/diffDigests/backupEntries/pipelineForRestore helpers —
+    reuse for T30): fresh-root round trip (modes 0600/0700/0755, symlink
+    + resolution, empty dirs, snapshots/ recreated, target root gains
+    ONLY .agentmod), backup-of-existing, nil-plan refusal, ghost-member
+    rollback to byte-identical tree, fresh-root failure leaves nothing,
+    duplicate-entry O_EXCL no-overwrite rollback, snapshot-inside-own-
+    snapshots/ (zip fd survives the backup rename). 8 new cli funcs:
+    round trip w/ deterministic backup name + .gitignore "added", skip
+    outside git repo, same-clock second restore refused, outside-project
+    exit 2, missing file exit 1, garbage + tampered exit 3 with
+    assertNoBackupOrLoss, arg table reworked (restore rows ×2). Binary
+    smoke in /tmp passed: A→B restore (marker traveled, backup held old
+    tree, .gitignore created with pattern, git status clean of backup) →
+    doctor "all 6 directories present" → garbage refusal exit 3 no
+    backup → unpack stub exit 1.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -764,42 +808,36 @@ mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
 (2026-06-11: same pattern again — `~/.codex` mtime now 6월 11 01:11, the
 other two homes and the skills list unchanged; no agentmod artifacts.
 Later same day: `~/.codex` mtime 6월 11 02:28, same verdict. And again
-16:44 — skills list + other two homes still match baseline.)
+16:44, then 19:15 — skills list + other two homes still match baseline.)
 
 ## Failing tests
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 6, third item: "restore writes only under .agentmod/; no script
-execution (+ tests)" — the extraction slice that turns `handoff restore`
-(and the `unpack` alias) from stubs into the real command. Re-read
-FABLE_PLAN §18/§25, IMPLEMENTATION_PLAN §12, and D034+D040+D041+D042
-before coding. Notes:
-- Pipeline is pinned (D042): Open → Verify (refuse on any problem, exit 3)
-  → PlanRestore (same) → BackupAgentmod (refuse on error) → extract the
-  plan: MkdirAll Dirs, write Files (O_CREATE|O_EXCL into the fresh tree),
-  create Links LAST (D041 ordering), `filepath.FromSlash` to join RelPath
-  to the project root. Never execute anything.
-- Restore needs a project? Decide: IMPLEMENTATION_PLAN §12 extracts under
-  the project root — but a restore on a fresh machine happens BEFORE init
-  (RESTORE.md's step order is install → init → restore → doctor, so
-  requiring a project matches the packed docs; check RESTORE.md wording in
-  docs.go before deciding otherwise).
-- On extraction failure: leave the backup in place and name BOTH paths
-  (partial tree + backup) — or roll back automatically (remove partial,
-  rename backup back). Decide and record; rollback = rename back (D042).
-- When a backup was created, extend .gitignore with `.agentmod.backup-*/`
-  via ensureGitignore generalized to take an entry (decision already
-  settled in D042 — implement, don't re-litigate) and print the backup
-  path. Also recreate layout.Subdirs() missing from the payload (snapshots/
-  is structurally excluded so the restored tree lacks it) or doctor will
-  warn right after restore.
-- The snapshot file itself may live INSIDE `.agentmod/snapshots/` of the
-  tree being renamed away — Open holds the zip open (rename keeps the fd
-  valid on POSIX), but verify the path-handling order anyway; safest is to
-  Open+Verify+Plan fully before calling BackupAgentmod.
-- Mind the smoke gotcha (D040): redirect smoke output OUTSIDE the project
-  or the D039 dirty gate trips.
+Phase 6, fourth item: "portability: separators, exec bits, MCP
+absolute-path warn/rewrite (+ tests)" — T27. Re-read FABLE_PLAN §18
+("OS path portability handling", "MCP absolute-path warning or
+rewriting") and IMPLEMENTATION_PLAN §12 before coding. Notes:
+- Much of T27 is ALREADY covered: backslash/drive-letter names are
+  hard-refused by PlanRestore (D041 — "normalized" was decided as
+  "refused": schema-v1 snapshot paths are forward-slash relative, full
+  stop), `filepath.FromSlash` joins RelPaths on extraction (D043), and
+  exec bits survive restore umask-proof (D043 round-trip test). The NEW
+  work is the MCP half: find absolute paths in restored MCP/agent config
+  (e.g. `.agentmod/claude/settings.json` hook commands point at the
+  SOURCE machine's agentmod binary — guardHookEntries/inspectGuardHook
+  from claudesettings.go can detect that, D029) and warn or rewrite.
+  Decide warn vs rewrite per file type and record it; rewriting the
+  guard hook command to THIS machine's binary is the obvious safe
+  rewrite (the wiring code already exists in ensureClaudeGuardHook).
+- The remaining slice after that ("post-restore doctor + re-login
+  notices; unpack alias", T26's ✅ flip) should print the re-login
+  remedies (handoff.ClaudeReloginRemedy/CodexReloginRemedy — already
+  exported), run/point at doctor, wire `unpack` as a true alias, and
+  mention deleting the backup once verified (D042/D043 notes).
+- D043's known wrinkle if it comes up: init-before-`git init` projects
+  end up with a .gitignore holding only the backup pattern after an
+  in-repo restore; re-running init fixes it (D014).
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

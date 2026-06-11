@@ -242,7 +242,8 @@ func TestHandoffArgumentValidation(t *testing.T) {
 		{"unknown subcommand", []string{"frobnicate"}, `unknown handoff subcommand "frobnicate"`},
 		{"unsupported flag", []string{"create", "--frobnicate"}, `unsupported argument "--frobnicate"`},
 		{"output without path", []string{"create", "--output"}, "--output requires a path"},
-		{"restore not implemented", []string{"restore"}, "handoff restore is not implemented yet"},
+		{"restore without path", []string{"restore"}, "handoff restore takes exactly one argument"},
+		{"restore extra args", []string{"restore", "a.amod", "b.amod"}, "handoff restore takes exactly one argument"},
 		{"inspect without path", []string{"inspect"}, "handoff inspect takes exactly one argument"},
 		{"inspect extra args", []string{"inspect", "a.amod", "b.amod"}, "handoff inspect takes exactly one argument"},
 		{"verify without path", []string{"verify"}, "handoff verify takes exactly one argument"},
@@ -557,6 +558,171 @@ func TestPackAliasCreates(t *testing.T) {
 		t.Fatalf("pack produced no snapshot: %v", err)
 	}
 	wantContains(t, "stdout", out.String(), "Created handoff snapshot: "+output)
+}
+
+func TestHandoffRestoreRoundTrip(t *testing.T) {
+	// Create in project A, restore into project B: B's previous .agentmod/
+	// is backed up (deterministically named — fakeNow is fixed), the
+	// payload lands, and .gitignore gains the backup pattern (D042). B gets
+	// a pre-existing .gitignore because an existing file is extended even
+	// outside a git repository (D014).
+	src := makeProject(t, config.Default())
+	claudeDir := filepath.Join(src, ".agentmod", "claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "marker.md"), []byte("travels\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "snap.amod")
+	if code, _, stderr := runHandoffForTest(t, fakeEnv(src, nil), "create", "--output", output); code != ExitOK {
+		t.Fatalf("create failed: %s", stderr)
+	}
+
+	dst := makeProject(t, config.Default())
+	if err := os.WriteFile(filepath.Join(dst, ".gitignore"), []byte(".agentmod/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldConfig, err := os.ReadFile(filepath.Join(dst, ".agentmod", "agentmod.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runHandoffForTest(t, fakeEnv(dst, nil), "restore", output)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	wantBackup := filepath.Join(dst, ".agentmod.backup-"+fakeNow.Format("20060102-150405"))
+	wantContains(t, "stdout", stdout,
+		"Restored handoff snapshot: "+output,
+		"extracted: ",
+		"— all under "+filepath.Join(dst, ".agentmod"),
+		"previous environment backed up to: "+wantBackup,
+		".gitignore: added .agentmod.backup-*/",
+		"agentmod doctor",
+	)
+	// The marker traveled; the old environment is intact in the backup.
+	data, err := os.ReadFile(filepath.Join(dst, ".agentmod", "claude", "marker.md"))
+	if err != nil || string(data) != "travels\n" {
+		t.Errorf("restored marker = %q, %v", data, err)
+	}
+	backedUp, err := os.ReadFile(filepath.Join(wantBackup, "agentmod.toml"))
+	if err != nil || !bytes.Equal(backedUp, oldConfig) {
+		t.Errorf("backup config mismatch (err = %v)", err)
+	}
+	gi, err := os.ReadFile(filepath.Join(dst, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantContains(t, ".gitignore", string(gi), ".agentmod/\n", ".agentmod.backup-*/\n")
+}
+
+func TestHandoffRestoreGitignoreSkippedOutsideGitRepo(t *testing.T) {
+	// No .gitignore and no git repository: the backup still happens, the
+	// gitignore step reports the skip instead of creating a file (D014).
+	src := makeProject(t, config.Default())
+	output := filepath.Join(t.TempDir(), "snap.amod")
+	if code, _, stderr := runHandoffForTest(t, fakeEnv(src, nil), "create", "--output", output); code != ExitOK {
+		t.Fatalf("create failed: %s", stderr)
+	}
+	dst := makeProject(t, config.Default())
+	code, stdout, stderr := runHandoffForTest(t, fakeEnv(dst, nil), "restore", output)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	wantContains(t, "stdout", stdout, ".gitignore: skipped (not a git repository")
+	if _, err := os.Stat(filepath.Join(dst, ".gitignore")); !os.IsNotExist(err) {
+		t.Errorf("restore created a .gitignore outside a git repository (err = %v)", err)
+	}
+}
+
+func TestHandoffRestoreSecondSameClockRefused(t *testing.T) {
+	// fakeEnv's clock never advances, so a second restore's backup name
+	// collides with the first's; BackupAgentmod refuses rather than
+	// overwrite (D042) and nothing is extracted.
+	src := makeProject(t, config.Default())
+	output := filepath.Join(t.TempDir(), "snap.amod")
+	if code, _, stderr := runHandoffForTest(t, fakeEnv(src, nil), "create", "--output", output); code != ExitOK {
+		t.Fatalf("create failed: %s", stderr)
+	}
+	dst := makeProject(t, config.Default())
+	env := fakeEnv(dst, nil)
+	if code, _, stderr := runHandoffForTest(t, env, "restore", output); code != ExitOK {
+		t.Fatalf("first restore failed: %s", stderr)
+	}
+	code, _, stderr := runHandoffForTest(t, env, "restore", output)
+	if code != ExitError {
+		t.Fatalf("exit = %d, want %d", code, ExitError)
+	}
+	wantContains(t, "stderr", stderr, "already exists")
+}
+
+func TestHandoffRestoreOutsideProject(t *testing.T) {
+	code, _, stderr := runHandoffForTest(t, fakeEnv(t.TempDir(), nil), "restore", "whatever.amod")
+	if code != ExitNotInProject {
+		t.Fatalf("exit = %d, want %d", code, ExitNotInProject)
+	}
+	wantContains(t, "stderr", stderr, "requires an agentmod project", "agentmod init")
+}
+
+func TestHandoffRestoreMissingFile(t *testing.T) {
+	root := makeProject(t, config.Default())
+	code, _, stderr := runHandoffForTest(t, fakeEnv(root, nil), "restore", filepath.Join(t.TempDir(), "nope.amod"))
+	if code != ExitError {
+		t.Fatalf("exit = %d, want %d (a typo'd path is not a validation verdict)", code, ExitError)
+	}
+	wantContains(t, "stderr", stderr, "no such file")
+}
+
+func TestHandoffRestoreGarbageRefusedBeforeBackup(t *testing.T) {
+	// Open fails → exit 3, and because validation precedes any disk move
+	// (D042 pipeline), the existing .agentmod/ is untouched and unbacked-up.
+	root := makeProject(t, config.Default())
+	garbage := filepath.Join(t.TempDir(), "garbage.amod")
+	if err := os.WriteFile(garbage, []byte("not a zip\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, _, stderr := runHandoffForTest(t, fakeEnv(root, nil), "restore", garbage)
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d", code, ExitValidation)
+	}
+	wantContains(t, "stderr", stderr, "refusing to restore", "not a readable .amod snapshot")
+	assertNoBackupOrLoss(t, root)
+}
+
+func TestHandoffRestoreTamperedRefusedBeforeBackup(t *testing.T) {
+	// Verify problems → exit 3 naming the mismatch; nothing on disk moved.
+	root := makeProject(t, config.Default())
+	output := filepath.Join(t.TempDir(), "snap.amod")
+	if code, _, stderr := runHandoffForTest(t, fakeEnv(root, nil), "create", "--output", output); code != ExitOK {
+		t.Fatalf("create failed: %s", stderr)
+	}
+	tampered := filepath.Join(t.TempDir(), "tampered.amod")
+	victim := "payload/.agentmod/agentmod.toml"
+	tamperSnapshotMember(t, output, tampered, victim, []byte("schema_version = 9\n"))
+
+	code, _, stderr := runHandoffForTest(t, fakeEnv(root, nil), "restore", tampered)
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d", code, ExitValidation)
+	}
+	wantContains(t, "stderr", stderr, "integrity problems", "checksum mismatch for "+victim)
+	assertNoBackupOrLoss(t, root)
+}
+
+// assertNoBackupOrLoss fails if root gained a backup entry or lost its
+// .agentmod/agentmod.toml — the must-hold state after any refused restore.
+func assertNoBackupOrLoss(t *testing.T, root string) {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(root, ".agentmod.backup-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Errorf("refused restore created backup entries: %v", matches)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".agentmod", "agentmod.toml")); err != nil {
+		t.Errorf("refused restore disturbed .agentmod: %v", err)
+	}
 }
 
 func TestUnpackNotImplemented(t *testing.T) {

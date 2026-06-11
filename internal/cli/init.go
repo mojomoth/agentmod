@@ -121,7 +121,7 @@ func runInit(args []string, stdout, stderr io.Writer, env Env) int {
 		fmt.Fprintf(stderr, "agentmod: %v\n", err)
 		return ExitError
 	}
-	gitignoreStatus, err := ensureGitignore(cwd)
+	gitignoreStatus, err := ensureGitignore(cwd, gitignoreEntry)
 	if err != nil {
 		fmt.Fprintf(stderr, "agentmod: %v\n", err)
 		return ExitError

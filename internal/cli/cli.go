@@ -55,7 +55,10 @@ Commands:
               report without extracting; handoff verify FILE re-hashes
               every member against its checksums and exits 3 on mismatch;
               handoff list names the snapshots in .agentmod/snapshots/;
-              restore is not implemented yet)
+              handoff restore FILE replaces this project's .agentmod/ with
+              the snapshot's payload after verifying checksums and path
+              safety, backing the previous .agentmod/ up first; nothing
+              from a snapshot is ever executed)
   pack       alias of 'handoff create' (same flags)
   unpack     alias of 'handoff restore' (not implemented yet)
   version    print version and exit

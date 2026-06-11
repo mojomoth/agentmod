@@ -95,9 +95,16 @@ Add/split items freely; keep units small.
        no-op, occupied name refusal, stray-file backed up too; pipeline
        pinned Open→Verify→PlanRestore→Backup→extract; extraction slice must
        gitignore `.agentmod.backup-*/` when a backup was made)
-- [ ] restore writes only under .agentmod/; no script execution (+ tests)
-      (consumes (*Snapshot).PlanRestore (D041) + BackupAgentmod (D042);
-       Dirs→Files→Links order; gitignore the backup pattern per D042)
+- [x] restore writes only under .agentmod/; no script execution (+ tests)
+      (D043: (*Snapshot).Restore in internal/handoff/restore.go +
+       `handoff restore` cli; pipeline Stat→Open→Verify→PlanRestore all
+       before any disk move (refusals create no backup), exit 2/1/3/3/3;
+       Dirs(0700-then-chmod)→Files(O_EXCL+Chmod)→Links order; automatic
+       rollback = RemoveAll partial + rename backup back; layout.Subdirs
+       recreated; ensureGitignore generalized to (dir, entry),
+       .agentmod.backup-*/ added only when a backup was made; nothing
+       from a snapshot is ever executed; unpack stays a stub for the
+       notices slice; T24+T25 flip ✅, T26 🟡)
 - [ ] portability: separators, exec bits, MCP absolute-path warn/rewrite (+ tests)
 - [ ] post-restore doctor + re-login notices; unpack alias (+ tests)
 

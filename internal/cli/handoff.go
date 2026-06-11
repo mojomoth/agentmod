@@ -17,8 +17,6 @@ import (
 )
 
 // runHandoff dispatches `agentmod handoff <subcommand>` (FABLE_PLAN §18).
-// restore is named explicitly so users learn it is planned (Phase 6)
-// rather than mistyped.
 func runHandoff(args []string, stdout, stderr io.Writer, env Env) int {
 	if len(args) == 0 {
 		fmt.Fprintf(stderr, "agentmod: handoff requires a subcommand (try 'agentmod handoff create')\n")
@@ -34,8 +32,7 @@ func runHandoff(args []string, stdout, stderr io.Writer, env Env) int {
 	case "list":
 		return runHandoffList(args[1:], stdout, stderr, env)
 	case "restore":
-		fmt.Fprintf(stderr, "agentmod: handoff %s is not implemented yet\n", args[0])
-		return ExitError
+		return runHandoffRestore(args[1:], stdout, stderr, env)
 	}
 	fmt.Fprintf(stderr, "agentmod: unknown handoff subcommand %q (try 'agentmod handoff create')\n", args[0])
 	return ExitError
@@ -154,7 +151,94 @@ func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 		}
 		fmt.Fprintf(stdout, "    %s line %d (%s%s)\n", f.Path, f.Line, f.Pattern, mark)
 	}
-	fmt.Fprintf(stdout, "Verify or restore it on the target machine with 'agentmod handoff' (restore lands in a later release).\n")
+	fmt.Fprintf(stdout, "Verify it anywhere with 'agentmod handoff verify'; restore it on the target machine with 'agentmod handoff restore'.\n")
+	return ExitOK
+}
+
+// gitignoreBackupEntry is the .gitignore pattern covering restore backups
+// (D042): without it an untracked backup directory makes the worktree dirty
+// and trips the next handoff create's --allow-dirty gate.
+const gitignoreBackupEntry = handoff.BackupPrefix + "*/"
+
+// runHandoffRestore implements `agentmod handoff restore <file.amod>`:
+// replace this project's .agentmod/ with the snapshot's payload. The
+// pipeline is pinned by D042 — Open, Verify, PlanRestore, refusing on any
+// problem from any of them BEFORE anything on disk moves — then
+// handoff.Restore backs up the existing .agentmod/ and extracts the
+// validated plan (rolling back on failure). Nothing from the snapshot is
+// ever executed; every write lands under .agentmod/ (FABLE_PLAN §18/§21).
+func runHandoffRestore(args []string, stdout, stderr io.Writer, env Env) int {
+	if len(args) != 1 {
+		fmt.Fprintf(stderr, "agentmod: handoff restore takes exactly one argument: the .amod path (see 'agentmod handoff list')\n")
+		return ExitError
+	}
+	cwd, err := env.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "agentmod: %v\n", err)
+		return ExitError
+	}
+	// RESTORE.md's step order is init first, then restore from the project
+	// root — so restore requires a project, like create and list.
+	proj, err := project.Discover(cwd)
+	if errors.Is(err, project.ErrNotFound) {
+		fmt.Fprintf(stderr, "agentmod: handoff restore requires an agentmod project; run 'agentmod init' first (%v)\n", err)
+		return ExitNotInProject
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "agentmod: %v\n", err)
+		return ExitError
+	}
+	if _, err := os.Stat(args[0]); err != nil {
+		// A typo'd path is not a validation verdict (D040).
+		fmt.Fprintf(stderr, "agentmod: %v\n", err)
+		return ExitError
+	}
+	snap, err := handoff.Open(args[0])
+	if err != nil {
+		fmt.Fprintf(stderr, "agentmod: handoff restore: refusing to restore %s:\n  %v\n", args[0], err)
+		return ExitValidation
+	}
+	defer snap.Close()
+	if vres := snap.Verify(); len(vres.Problems) > 0 {
+		fmt.Fprintf(stderr, "agentmod: handoff restore: refusing to restore %s (integrity problems):\n", snap.Path)
+		for _, p := range vres.Problems {
+			fmt.Fprintf(stderr, "  %s\n", p)
+		}
+		return ExitValidation
+	}
+	plan, problems := snap.PlanRestore()
+	if len(problems) > 0 {
+		fmt.Fprintf(stderr, "agentmod: handoff restore: refusing to restore %s (unsafe to extract):\n", snap.Path)
+		for _, p := range problems {
+			fmt.Fprintf(stderr, "  %s\n", p)
+		}
+		return ExitValidation
+	}
+
+	now := time.Now()
+	if env.Now != nil {
+		now = env.Now()
+	}
+	res, err := snap.Restore(proj.Root, plan, now)
+	if err != nil {
+		fmt.Fprintf(stderr, "agentmod: %v\n", err)
+		return ExitError
+	}
+
+	fmt.Fprintf(stdout, "Restored handoff snapshot: %s\n", snap.Path)
+	fmt.Fprintf(stdout, "  extracted: %d directories, %d files, %d symlinks — all under %s\n", res.Dirs, res.Files, res.Links, proj.AgentmodDir)
+	if res.BackupPath != "" {
+		fmt.Fprintf(stdout, "  previous environment backed up to: %s (delete it once the restore checks out)\n", res.BackupPath)
+		line, gerr := ensureGitignore(proj.Root, gitignoreBackupEntry)
+		if gerr != nil {
+			// The restore itself succeeded; a .gitignore hiccup is a warning,
+			// not a failure — the next handoff create's dirty gate surfaces it.
+			fmt.Fprintf(stderr, "agentmod: warning: could not add %s to .gitignore: %v\n", gitignoreBackupEntry, gerr)
+		} else {
+			fmt.Fprintf(stdout, "  .gitignore: %s\n", line)
+		}
+	}
+	fmt.Fprintf(stdout, "Run 'agentmod doctor' to check the restored environment; re-login guidance is in the snapshot's RESTORE.md.\n")
 	return ExitOK
 }
 

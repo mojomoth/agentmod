@@ -42,8 +42,7 @@ func renderHandoffDoc(createdAt time.Time, version, platform, projectName string
 	b.WriteString("- `inventory.json` lists every payload file with size, mode, and\n  sha256; `checksums.txt` (sha256sum format) covers every\n  content-bearing member.\n")
 
 	b.WriteString("\n## How to restore\n\n")
-	b.WriteString("Run `agentmod handoff restore <this file>` inside the target project;\n`RESTORE.md` (packed next to this document) has the full steps,\nincluding re-login guidance.\n\n")
-	fmt.Fprintf(&b, "Note: the agentmod build that created this snapshot (%s) does not\nimplement restore yet; these documents travel with the snapshot so the\nmachine that restores it has them at hand.\n", version)
+	b.WriteString("Run `agentmod handoff restore <this file>` inside the target project;\n`RESTORE.md` (packed next to this document) has the full steps,\nincluding re-login guidance.\n")
 
 	b.WriteString("\n## What is missing\n\n")
 	if len(res.Excluded) == 0 {
@@ -70,7 +69,7 @@ func renderHandoffDoc(createdAt time.Time, version, platform, projectName string
 func renderRestoreDoc(version string) []byte {
 	var b strings.Builder
 	b.WriteString("# Restoring this snapshot\n\n")
-	fmt.Fprintf(&b, "Written by agentmod %s at create time. That build does not implement\nrestore yet; a build that ships it follows these steps, and the\nre-login and reinstall guidance below holds either way.\n", version)
+	fmt.Fprintf(&b, "Written by agentmod %s at create time. `agentmod handoff restore`\nfollows these steps; the re-login and reinstall guidance below applies\nafter any restore.\n", version)
 
 	b.WriteString("\n## Steps\n\n")
 	b.WriteString("1. Install agentmod on the target machine, plus the coding agents you\n   use (claude, codex, opencode).\n")

@@ -1,7 +1,7 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 6 slice 4 — restore portability
-pass: guard-hook rewrite + MCP absolute-path warnings, D044; T27 ✅)
+Last updated: 2026-06-11 (iteration: Phase 6 slice 5 — post-restore
+notices: inline doctor + re-login block + unpack alias, D045; T26 ✅)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
@@ -18,8 +18,9 @@ pass: guard-hook rewrite + MCP absolute-path warnings, D044; T27 ✅)
   D041; T24) + slice 2 (pre-restore backup BackupAgentmod, D042; T25) +
   slice 3 (extraction: Restore + `handoff restore` cli, D043; T24+T25 ✅,
   T26 🟡) + slice 4 (portability pass: guard rewrite + MCP warnings,
-  D044; T27 ✅) done; remaining: post-restore notices/doctor + unpack
-  alias, then the new doctor-MCP-finding follow-up item.
+  D044; T27 ✅) + slice 5 (post-restore notices: inline doctor +
+  re-login block + unpack alias, D045; T26 ✅) done; remaining: the
+  doctor-MCP-finding follow-up item, which completes Phase 6.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -813,6 +814,33 @@ pass: guard-hook rewrite + MCP absolute-path warnings, D044; T27 ✅)
     settings.json rewritten, 2 codex warnings w/ local-equivalent hint,
     doctor "wired with the current binary"; doctor exit 3 in the smoke
     subshell is the documented in-project-vars-unset warning, not a bug).
+- post-restore notices LANDED and green (Phase 6 slice 5 ✅, D045, T26 ✅):
+  runHandoffRestore's tail rebuilt; cli.go's `unpack` is now a TRUE alias
+  of `handoff restore` (stub gone, usage updated). Read D045 (+D037/D043/
+  D044) before touching restore output.
+  - Doctor runs INLINE after a successful restore (settled run-inline vs
+    print-the-command: FABLE_PLAN §18 makes "Run doctor after restore" a
+    pipeline property). Its exit code NEVER propagates — restore stays 0
+    with a one-line "doctor reported findings above; the restore itself
+    succeeded" note, because doctor routinely exits 3 post-restore
+    (vars-unset in not-yet-reactivated shells, D044 smoke note).
+  - Re-login block unconditional (auth never travels by construction,
+    D035): canonical handoff.Claude/CodexReloginRemedy strings (D037,
+    byte-identical to RESTORE.md/doctor) + OpenCode line + REDACTION.md
+    pointer; macOS Keychain line only when env.GOOS == "darwin" (D025
+    pattern — fakeEnv's "" GOOS proves the gate in tests).
+  - D043 wrinkle surfaced live: backup-gitignore success + file not
+    covering `.agentmod/` → note naming re-run-init (gitignoreCovers
+    read-back, no new parsing).
+  - Tests: round-trip grew re-login/doctor/no-Keychain/no-note
+    assertions; TestUnpackNotImplemented replaced by
+    TestUnpackAliasRestores + TestUnpackAliasArgValidation; new
+    TestHandoffRestoreDarwinKeychainNotice +
+    TestHandoffRestoreGitignoreCoverageNote (bare .git dir fixture,
+    .gitignore content pinned to exactly the backup pattern). Binary
+    smoke in /tmp passed: A→B unpack printed the full block, real-darwin
+    Keychain line, inline doctor with the documented dev-machine warns
+    (D010 global gstack, OpenCode globals, hook-inactive), EXIT=0.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -849,25 +877,25 @@ Later same day: `~/.codex` mtime 6월 11 02:28, same verdict. And again
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 6, fifth item: "post-restore doctor + re-login notices; unpack
-alias (+ tests)" — flips T26 ✅ and completes Phase 6's TASKS list
-(the new doctor-MCP-finding follow-up item comes after). Notes:
-- Print the re-login remedies after restore
-  (handoff.ClaudeReloginRemedy/CodexReloginRemedy — already exported
-  from internal/handoff, identical strings to RESTORE.md/doctor), plus
-  the macOS Keychain note where env.GOOS == "darwin" (D025 pattern).
-- Run or point at doctor (FABLE_PLAN §18 "Run doctor after restore" —
-  decide run-inline vs print-the-command and record it; runDoctor takes
-  (stdout, stderr, env) so inline is feasible, but mind its exit-3
-  in-project-vars-unset warning firing in fresh shells, see D044 smoke
-  note).
-- Wire `unpack` as a TRUE alias of `handoff restore` (cli.go top-level
-  case currently prints the stub message; mirror the `pack` alias).
-- Mention deleting the backup once verified (D042/D043) and the D043
-  known wrinkle (init-before-`git init` → .gitignore holds only the
-  backup pattern; re-run init).
-- Insertion point: runHandoffRestore between reportPortability and the
-  current closing line (which the notices likely replace/extend).
+Phase 6, final item: "doctor: portability/MCP absolute-path finding
+(§23 'MCP warnings' + 'Portability risks')" — the D044 follow-up that
+completes Phase 6. Notes:
+- Reuse `scanRestoredConfigs(agentmodDir)` from
+  internal/cli/portability.go verbatim (it is read-only and already
+  returns sorted, deduplicated `portabilityWarning{File, Path, Detail}`
+  values) — doctor should re-surface on demand what restore printed
+  once (D044 records this intent).
+- Add a finding family (e.g. label "Agent config paths") inside-project
+  only, following the D021 finding pattern: zero warnings → ok line;
+  each warning → warn-level finding (exit 3 via the existing contract).
+  Decide gating: probably skip-when-no-config-files (D024 skip-when-moot
+  pattern) vs always-ok — record in DECISIONS.md.
+- Mind TestDoctorAllHealthy: mkLayout writes a guard-wired settings.json
+  whose command contains fakeBinPath `/fake/bin/agentmod` — that string
+  is guardHookMarker-exempt in classifyAbsoluteToken, so it should stay
+  clean; verify rather than assume.
+- After this, Phase 7 (git handoff: --for-git → .agentmod-handoff/)
+  begins — read FABLE_PLAN §19 + IMPLEMENTATION_PLAN before slicing.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

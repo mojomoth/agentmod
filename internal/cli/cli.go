@@ -60,7 +60,7 @@ Commands:
               safety, backing the previous .agentmod/ up first; nothing
               from a snapshot is ever executed)
   pack       alias of 'handoff create' (same flags)
-  unpack     alias of 'handoff restore' (not implemented yet)
+  unpack     alias of 'handoff restore' (same argument)
   version    print version and exit
   help       show this help
 
@@ -102,8 +102,7 @@ func run(args []string, stdout, stderr io.Writer, env Env) int {
 	case "pack":
 		return runHandoffCreate(args[1:], stdout, stderr, env)
 	case "unpack":
-		fmt.Fprintf(stderr, "agentmod: unpack (alias of 'agentmod handoff restore') is not implemented yet\n")
-		return ExitError
+		return runHandoffRestore(args[1:], stdout, stderr, env)
 	case "version", "--version":
 		fmt.Fprintf(stdout, "agentmod %s\n", Version)
 		return ExitOK

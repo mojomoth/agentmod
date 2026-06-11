@@ -114,7 +114,13 @@ Add/split items freely; keep units small.
        claude/settings.json + claude/.claude.json + codex/config.toml +
        opencode/opencode.json and WARNS on machine-specific absolute paths
        (never rewrites user-owned files, never changes exit code); T27 ✅)
-- [ ] post-restore doctor + re-login notices; unpack alias (+ tests)
+- [x] post-restore doctor + re-login notices; unpack alias (+ tests)
+      (D045: doctor runs INLINE after a successful restore, its exit code
+       never propagates (restore stays 0 — D044's vars-unset warning fires
+       routinely in fresh shells); unconditional re-login block with the
+       canonical D037 remedy strings + darwin-only Keychain line via
+       env.GOOS; D043's gitignore-coverage wrinkle noted in output when it
+       happens; unpack = true alias of handoff restore; T26 flips ✅)
 - [ ] doctor: portability/MCP absolute-path finding (§23 "MCP warnings" +
       "Portability risks"; reuse scanRestoredConfigs from D044)
 

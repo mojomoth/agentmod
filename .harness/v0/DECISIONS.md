@@ -1213,3 +1213,50 @@ touching portability/guard-rewrite code.
   warnings" + "Portability risks") reusing scanRestoredConfigs — restore
   prints the warnings once; doctor should be able to re-surface them on
   demand.
+
+## D045 — 2026-06-11 — Post-restore notices: inline doctor, canonical re-login block, unpack alias (Phase 6 slice 5)
+
+`runHandoffRestore` (internal/cli/handoff.go) grew the post-restore tail;
+cli.go's `unpack` case now dispatches to runHandoffRestore (true alias,
+stub gone). Read D034+D040–D044+this before touching restore output.
+
+- **Doctor runs INLINE after a successful restore** (settling the
+  run-inline vs print-the-command question from the slice-4 handoff):
+  FABLE_PLAN §18 lists "Run doctor after restore" as a property of the
+  restore pipeline itself, and §29's checklist repeats it — printing a
+  suggestion would leave the requirement on the user. `runDoctor(nil,
+  stdout, stderr, env)` after a "Checking the restored environment with
+  'agentmod doctor':" header.
+- **Doctor's exit code NEVER propagates**: the restore already succeeded,
+  and doctor routinely exits 3 right after a restore (in-project-vars-
+  unset in any shell that has not re-activated, the documented D044
+  smoke note; plus dev-machine findings like D010's global gstack). A
+  non-zero doctor adds one stdout line ("doctor reported findings above;
+  the restore itself succeeded — fix what applies and re-run 'agentmod
+  doctor'."); restore exits 0. A restore that "fails" because the user's
+  shell hook has not fired yet would train users to ignore failures.
+- **Re-login block always prints** (§18 "Notice of secrets-excluded items
+  (and re-login guidance)"): auth never travels by construction (D035
+  exclusion rules are not optional), so the notice is unconditional, not
+  gated on what this particular snapshot excluded. Wording = the
+  canonical handoff.ClaudeReloginRemedy/CodexReloginRemedy strings
+  (D037: same bytes as RESTORE.md and doctor) + the OpenCode line +
+  a pointer at REDACTION.md via 'handoff inspect' for the full exclusion
+  list. macOS Keychain line only when env.GOOS == "darwin" (D025
+  pattern: injected GOOS, never runtime.GOOS — tests stay
+  host-independent).
+- **D043 wrinkle surfaced at the moment it happens**: when the backup
+  gitignore step succeeds but the resulting .gitignore does not cover
+  `.agentmod/` (project init'd before 'git init' → restore created the
+  file with only the backup pattern), restore prints a note naming
+  re-run-init as the remedy. Checked by reading the file back with
+  gitignoreCovers — no new parsing.
+- **unpack = true alias**: `agentmod unpack <file.amod>` is
+  runHandoffRestore verbatim (same single-argument contract, same exit
+  codes), mirroring pack≡create. Usage line updated.
+- Tests: round-trip test grew the re-login/doctor/no-Keychain/no-note
+  assertions (fakeEnv GOOS "" proves the darwin gate); new
+  TestUnpackAliasRestores + TestUnpackAliasArgValidation (replacing
+  TestUnpackNotImplemented) + TestHandoffRestoreDarwinKeychainNotice +
+  TestHandoffRestoreGitignoreCoverageNote (bare .git dir fixture, file
+  content pinned to exactly the backup pattern).

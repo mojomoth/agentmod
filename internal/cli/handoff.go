@@ -236,6 +236,12 @@ func runHandoffRestore(args []string, stdout, stderr io.Writer, env Env) int {
 			fmt.Fprintf(stderr, "agentmod: warning: could not add %s to .gitignore: %v\n", gitignoreBackupEntry, gerr)
 		} else {
 			fmt.Fprintf(stdout, "  .gitignore: %s\n", line)
+			if data, rerr := os.ReadFile(filepath.Join(proj.Root, ".gitignore")); rerr == nil && !gitignoreCovers(data, gitignoreEntry) {
+				// D043 wrinkle: a project initialized before 'git init' never
+				// got the .agentmod/ entry, so this restore's edit alone
+				// would leave .agentmod/ committable.
+				fmt.Fprintf(stdout, "  note: .gitignore does not cover %s yet — re-run 'agentmod init' to add it\n", gitignoreEntry)
+			}
 		}
 	}
 	// Portability pass (FABLE_PLAN §18, D044): re-wire the guard hook for
@@ -243,7 +249,28 @@ func runHandoffRestore(args []string, stdout, stderr io.Writer, env Env) int {
 	// the source machine. Restore already succeeded — nothing here changes
 	// the exit code.
 	reportPortability(stdout, stderr, proj.AgentmodDir, env)
-	fmt.Fprintf(stdout, "Run 'agentmod doctor' to check the restored environment; re-login guidance is in the snapshot's RESTORE.md.\n")
+
+	// §18 "Notice of secrets-excluded items (and re-login guidance)": auth
+	// and credentials never travel (default exclusion policy, D035), so
+	// every agent needs a fresh login here. Same canonical wording as
+	// RESTORE.md and doctor (internal/handoff owns the strings, D037).
+	fmt.Fprintf(stdout, "Re-login (auth and credentials never travel in a snapshot; the full exclusion list is the snapshot's REDACTION.md, via 'agentmod handoff inspect'):\n")
+	fmt.Fprintf(stdout, "  Claude Code: %s.\n", handoff.ClaudeReloginRemedy)
+	fmt.Fprintf(stdout, "  Codex CLI: %s.\n", handoff.CodexReloginRemedy)
+	fmt.Fprintf(stdout, "  OpenCode: log in to your provider again if it asks.\n")
+	if env.GOOS == "darwin" {
+		fmt.Fprintf(stdout, "  macOS: Claude Code auth lives in the shared user Keychain — one login covers every project on this machine (D025 limitation).\n")
+	}
+
+	// §18 "Run doctor after restore": run it inline so the restored
+	// environment is checked immediately (D045). Doctor's findings are
+	// advisory here — the restore itself succeeded, so its exit code never
+	// changes this command's (doctor routinely warns about routing vars in
+	// a shell that has not re-activated yet, see the D044 smoke note).
+	fmt.Fprintf(stdout, "Checking the restored environment with 'agentmod doctor':\n")
+	if dcode := runDoctor(nil, stdout, stderr, env); dcode != ExitOK {
+		fmt.Fprintf(stdout, "doctor reported findings above; the restore itself succeeded — fix what applies and re-run 'agentmod doctor'.\n")
+	}
 	return ExitOK
 }
 

@@ -603,8 +603,26 @@ func TestHandoffRestoreRoundTrip(t *testing.T) {
 		// pass wires the guard fresh for this machine (D044).
 		"Claude guard: PreToolUse Bash hook written",
 		"portability: no foreign absolute paths in restored agent configs",
-		"agentmod doctor",
+		// §18 re-login notice — canonical wording shared with RESTORE.md.
+		"Re-login (auth and credentials never travel in a snapshot",
+		"Claude Code: "+handoff.ClaudeReloginRemedy+".",
+		"Codex CLI: "+handoff.CodexReloginRemedy+".",
+		"OpenCode: log in to your provider again if it asks.",
+		// §18 post-restore doctor runs inline (D045); fakeEnv has no routing
+		// vars, so doctor warns — and restore's exit code stays 0 anyway.
+		"Checking the restored environment with 'agentmod doctor':",
+		"Project: root "+dst,
+		"doctor reported findings above; the restore itself succeeded",
 	)
+	// fakeEnv's GOOS is "" (not darwin), so the Keychain line must not show.
+	if strings.Contains(stdout, "Keychain") {
+		t.Errorf("non-darwin restore printed the macOS Keychain notice:\n%s", stdout)
+	}
+	// .gitignore already covered .agentmod/, so the D043 coverage note must
+	// not show.
+	if strings.Contains(stdout, "re-run 'agentmod init' to add it") {
+		t.Errorf("restore printed the .gitignore coverage note despite full coverage:\n%s", stdout)
+	}
 	// The marker traveled; the old environment is intact in the backup.
 	data, err := os.ReadFile(filepath.Join(dst, ".agentmod", "claude", "marker.md"))
 	if err != nil || string(data) != "travels\n" {
@@ -787,13 +805,87 @@ func assertNoBackupOrLoss(t *testing.T, root string) {
 	}
 }
 
-func TestUnpackNotImplemented(t *testing.T) {
+func TestUnpackAliasRestores(t *testing.T) {
+	// `agentmod unpack` is `agentmod handoff restore` (FABLE_PLAN §11 Alias):
+	// same argument contract, same pipeline.
+	src := makeProject(t, config.Default())
+	output := filepath.Join(t.TempDir(), "snap.amod")
+	if code, _, stderr := runHandoffForTest(t, fakeEnv(src, nil), "create", "--output", output); code != ExitOK {
+		t.Fatalf("create failed: %s", stderr)
+	}
+	dst := makeProject(t, config.Default())
 	var out, errBuf bytes.Buffer
-	code := run([]string{"unpack"}, &out, &errBuf, fakeEnv(t.TempDir(), nil))
+	code := run([]string{"unpack", output}, &out, &errBuf, fakeEnv(dst, nil))
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, errBuf.String())
+	}
+	wantContains(t, "stdout", out.String(),
+		"Restored handoff snapshot: "+output,
+		"Checking the restored environment with 'agentmod doctor':",
+	)
+}
+
+func TestUnpackAliasArgValidation(t *testing.T) {
+	// No argument → restore's own usage error, nothing touched.
+	root := makeProject(t, config.Default())
+	var out, errBuf bytes.Buffer
+	code := run([]string{"unpack"}, &out, &errBuf, fakeEnv(root, nil))
 	if code != ExitError {
 		t.Fatalf("exit = %d, want %d", code, ExitError)
 	}
-	wantContains(t, "stderr", errBuf.String(), "unpack", "handoff restore", "not implemented yet")
+	wantContains(t, "stderr", errBuf.String(), "handoff restore takes exactly one argument")
+	assertNoBackupOrLoss(t, root)
+}
+
+func TestHandoffRestoreDarwinKeychainNotice(t *testing.T) {
+	// On macOS the re-login block gains the shared-Keychain limitation note
+	// (§15.1, D025 pattern: env.GOOS, never runtime.GOOS).
+	src := makeProject(t, config.Default())
+	output := filepath.Join(t.TempDir(), "snap.amod")
+	if code, _, stderr := runHandoffForTest(t, fakeEnv(src, nil), "create", "--output", output); code != ExitOK {
+		t.Fatalf("create failed: %s", stderr)
+	}
+	dst := makeProject(t, config.Default())
+	env := fakeEnv(dst, nil)
+	env.GOOS = "darwin"
+	code, stdout, stderr := runHandoffForTest(t, env, "restore", output)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	wantContains(t, "stdout", stdout,
+		"macOS: Claude Code auth lives in the shared user Keychain")
+}
+
+func TestHandoffRestoreGitignoreCoverageNote(t *testing.T) {
+	// D043 wrinkle: a project initialized before 'git init' has no .agentmod/
+	// gitignore entry, so the restore-created .gitignore holds only the
+	// backup pattern — restore says so and names the re-init remedy.
+	src := makeProject(t, config.Default())
+	output := filepath.Join(t.TempDir(), "snap.amod")
+	if code, _, stderr := runHandoffForTest(t, fakeEnv(src, nil), "create", "--output", output); code != ExitOK {
+		t.Fatalf("create failed: %s", stderr)
+	}
+	dst := makeProject(t, config.Default())
+	// A bare .git directory satisfies insideGitRepo (D014, no git exec), so
+	// the restore creates the missing .gitignore.
+	if err := os.MkdirAll(filepath.Join(dst, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := runHandoffForTest(t, fakeEnv(dst, nil), "restore", output)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	wantContains(t, "stdout", stdout,
+		".gitignore: created with .agentmod.backup-*/",
+		"note: .gitignore does not cover .agentmod/ yet — re-run 'agentmod init' to add it",
+	)
+	gi, err := os.ReadFile(filepath.Join(dst, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gi) != ".agentmod.backup-*/\n" {
+		t.Errorf(".gitignore = %q, want only the backup pattern", gi)
+	}
 }
 
 // tamperSnapshotMember copies the zip at src to dst, replacing the named

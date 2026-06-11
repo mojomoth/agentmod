@@ -1,7 +1,7 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 5 slice 6 — handoff
-inspect/verify/list + pack/unpack aliases, D040; Phase 5 COMPLETE)
+Last updated: 2026-06-11 (iteration: Phase 6 slice 1 — restore validation
+layer PlanRestore + malicious fixtures, D041; T24 🟡)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
@@ -14,7 +14,8 @@ inspect/verify/list + pack/unpack aliases, D040; Phase 5 COMPLETE)
   scan + REDACTION.md, T21 ✅) + slice 4 (HANDOFF.md + RESTORE.md docs,
   D037; T19 ✅) + slice 5 (git state metadata + --allow-dirty, D039;
   T22 ✅) + slice 6 (inspect/verify/list + pack alias, D040; T23 ✅).
-  Next phase: Phase 6 restore.
+  Phase 6 IN PROGRESS: slice 1 (restore validation layer PlanRestore,
+  D041; T24 🟡) done; next is the backup slice.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -686,6 +687,34 @@ inspect/verify/list + pack/unpack aliases, D040; Phase 5 COMPLETE)
   - Smoke gotcha: shell redirects INTO the repo (`> create.out`) make the
     worktree dirty and trip the D039 gate — redirect smoke output outside
     the project.
+- restore validation layer LANDED and green (Phase 6 slice 1 ✅, D041,
+  T24 🟡): new `internal/handoff/validate.go` — `(*Snapshot).PlanRestore()
+  (*RestorePlan, []string)` returns ALL path-safety problems in one pass
+  or the extraction plan (`PlanEntry{ZipName, RelPath, Mode, Target}` in
+  Dirs/Files/Links, each sorted by RelPath). Read D034+D040+D041 before
+  touching restore code; the extraction slice EXECUTES this plan.
+  - Validation-only slice (decided in D041): `handoff restore`/`unpack`
+    stay not-implemented stubs until extraction lands. Restore pipeline
+    will be Open → Verify → PlanRestore, refusing on any problem from
+    either; PlanRestore never hashes (Verify's job) but DOES gate schema
+    version (read.go's new shared `schemaProblem()` — Verify refactored
+    onto it, wording unchanged, no test churn).
+  - Refusals: non-root-member outside payload/ (smuggled `../evil`),
+    backslash/absolute/`C:`-drive names, non-canonical paths (Clean
+    fixpoint), `..` escapes named "zip-slip", first element must be
+    `.agentmod` (schema-v1 whitelist), §21 protected elements
+    (.git/.ssh/.aws/.docker) anywhere below it, duplicate payload paths,
+    irregular member types, symlink targets that are empty/absolute/
+    backslashed/>4096 bytes/lexically escaping `.agentmod/`. Setuid/
+    setgid/sticky are STRIPPED (Mode().Perm()), not refused. Links must
+    be extracted LAST (field doc pins Dirs → Files → Links).
+  - Tests: 11 funcs in new validate_test.go — hostile symlink targets
+    made by MUTATING the fixture link's content via rewriteSnapshot w/
+    fixChecksums (content IS the target, D034); new `addZipMember`
+    helper appends one member with an explicit mode (fifo, setuid,
+    extra symlinks) which rewriteSnapshot's fixed-mode extras cannot;
+    `wantNoPlan` asserts nil-plan + named problem. Clean fixture pins
+    the exact Dirs/Files/Links sets incl. modes + link target.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -722,24 +751,25 @@ Later same day: `~/.codex` mtime 6월 11 02:28, same verdict. And again
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 6, first item: "validation: schema version, checksums, zip-slip,
-absolute paths, symlinks (+ malicious fixtures)". Re-read FABLE_PLAN §18
-("Handoff restore"), §21 Critical list, §22 (portability), §25 (security),
-IMPLEMENTATION_PLAN §12 restore pipeline, and D034+D040 before coding.
-Notes:
-- Build restore's validation on handoff.Open + (*Snapshot).Verify (D040) —
-  schema-version hard refusal (> SchemaVersion), checksum verification,
-  THEN per-entry path validation: relative, cleaned, no `..` escape, no
-  absolute paths, symlink targets must resolve inside the payload, never
-  write outside .agentmod/ (§21: never .ssh/.aws/.docker/.git).
-- Malicious fixtures: read_test.go's rewriteSnapshot helper (mutate/drop/
-  add members + optional checksums regeneration) builds zip-slip /
-  absolute-path / escaping-symlink archives without hand-rolling zips.
-- This slice can be validation-only (a `validateSnapshot` /
-  `planExtraction` layer + tests) — actual extraction, backup, and the
-  post-restore doctor are the following TASKS items. Keep `handoff
-  restore` answering not-implemented until extraction lands, or wire a
-  validate-only failure path; decide and record.
+Phase 6, second item: "backup existing .agentmod before restore (+ tests)".
+Re-read FABLE_PLAN §18 ("Backup of the existing `.agentmod` first"), §25,
+IMPLEMENTATION_PLAN §12 (backup to `.agentmod.backup-<timestamp>`), and
+D034+D040+D041 before coding. Notes:
+- IMPLEMENTATION_PLAN §12 names the backup target
+  `.agentmod.backup-<timestamp>`; timestamp should come from env.Now
+  (D034's injected clock) for testability. Decide rename-vs-copy (rename
+  is atomic and fast; the ORIGINAL must survive any later extraction
+  failure) and record it.
+- This can be a small library/cli slice on its own, or fold into the
+  extraction slice ("restore writes only under .agentmod/") if both stay
+  small — extraction consumes (*Snapshot).PlanRestore() (D041): MkdirAll
+  Dirs, write Files, create Links LAST, never execute anything.
+- The `.agentmod.backup-*` name must NOT be matched by project discovery
+  (it isn't — Discover looks for `.agentmod/agentmod.toml` exactly), and
+  handoff list/init must not trip over it; check .gitignore semantics
+  (D014 covers `.agentmod/` only — a backup dir next to it would show up
+  in git status; decide whether ensureGitignore should also cover
+  `.agentmod.backup-*` or restore should warn).
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

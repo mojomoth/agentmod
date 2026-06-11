@@ -124,10 +124,8 @@ func (s *Snapshot) Verify() *VerifyResult {
 		res.Problems = append(res.Problems, fmt.Sprintf(format, args...))
 	}
 
-	if s.Manifest.SchemaVersion > SchemaVersion {
-		problemf("manifest schema_version %d is newer than this build supports (%d); upgrade agentmod", s.Manifest.SchemaVersion, SchemaVersion)
-	} else if s.Manifest.SchemaVersion < 1 {
-		problemf("manifest schema_version %d is not a valid version", s.Manifest.SchemaVersion)
+	if p := s.schemaProblem(); p != "" {
+		problemf("%s", p)
 	}
 
 	// checksums.txt: "<64-hex>  <member>" per line (sha256sum format).
@@ -245,6 +243,19 @@ func (s *Snapshot) Verify() *VerifyResult {
 		}
 	}
 	return res
+}
+
+// schemaProblem returns the schema-version complaint shared by Verify and
+// PlanRestore (single source so verify output and restore refusals never
+// drift), or "" when the version is one this build supports.
+func (s *Snapshot) schemaProblem() string {
+	if s.Manifest.SchemaVersion > SchemaVersion {
+		return fmt.Sprintf("manifest schema_version %d is newer than this build supports (%d); upgrade agentmod", s.Manifest.SchemaVersion, SchemaVersion)
+	}
+	if s.Manifest.SchemaVersion < 1 {
+		return fmt.Sprintf("manifest schema_version %d is not a valid version", s.Manifest.SchemaVersion)
+	}
+	return ""
 }
 
 // readZipMember returns the member's full content.

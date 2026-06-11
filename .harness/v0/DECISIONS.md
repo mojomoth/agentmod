@@ -1004,3 +1004,58 @@ snapshot read/restore code — Phase 6 restore MUST build on Open/Verify.
 - **Test helper**: read_test.go's rewriteSnapshot (mutate/drop/add members
   + optional checksums regeneration so ONLY the deliberate inconsistency
   remains) is the tamper harness for T24's malicious restore fixtures.
+
+## D041 — 2026-06-11 — Restore validation layer: (*Snapshot).PlanRestore (Phase 6 slice 1)
+
+Restore-side path-safety validation lives in new
+`internal/handoff/validate.go`: `(*Snapshot).PlanRestore() (*RestorePlan,
+[]string)` — problems (human sentences, detection order, ALL collected in
+one pass) or a plan, never both. Read D034+D040+this before touching
+restore code; the extraction slice EXECUTES this plan and must not invent
+its own path handling.
+
+- **Validation-only slice**: `handoff restore`/`unpack` stay
+  not-implemented stubs. A half-wired restore that validates but cannot
+  extract would change its user contract twice in two slices; the layer is
+  library-level until extraction lands (next two TASKS items).
+- **Orthogonal to Verify** (D040): Verify judges integrity (hashes,
+  inventory agreement), PlanRestore judges path safety and never hashes.
+  Restore must run Open → Verify → PlanRestore and refuse on ANY problem
+  from either. The schema-version gate is IN PlanRestore too (restore
+  hard-refuses; shared wording via new `schemaProblem()` helper so verify
+  output and restore refusals never drift).
+- **Member rules**: every member must be a §21 root member or under
+  `payload/` (anything else — e.g. a smuggled `../evil` — is a problem);
+  payload rel paths must be canonical (`path.Clean` fixpoint), relative
+  (no leading `/`, no `C:` drive prefix), backslash-free, free of `..`
+  (zip-slip named explicitly when the cleaned path escapes), first element
+  `.agentmod` (the schema-v1 whitelist; project-level payload roots get a
+  schema bump), no duplicates, and no protected elements.
+- **Protected elements** = exactly §21's four (`.git`, `.ssh`, `.aws`,
+  `.docker`) as path elements anywhere under `.agentmod/`. Create's
+  exclusion rules cover a broader credential-dir set, but on restore every
+  write is already confined to `.agentmod/`; only these four need an
+  explicit deny (`.git` notably — a hostile snapshot could plant git
+  hooks). Legit snapshots never contain them (create excludes them).
+- **Symlinks**: target read from member content (capped at 4096 bytes —
+  larger is hostile, not a link); must be non-empty, relative,
+  backslash-free, and LEXICALLY resolve inside `.agentmod/`
+  (`path.Join(dir(rel), target)` must stay under the whitelist root).
+  Containment is inductive: every link points inside `.agentmod/`, so
+  chains cannot escape. Extraction must still write Dirs → Files → Links
+  (links LAST) so no file write passes through a just-restored symlink —
+  RestorePlan's field doc pins this order.
+- **Modes**: plan entries carry `Mode().Perm()` only — setuid/setgid/
+  sticky from hostile zips are silently stripped, not refused (a refusal
+  would block snapshots from systems with odd umasks for no safety gain).
+  Irregular member types (fifo etc.) are problems.
+- **Plan shape**: Dirs/Files/Links each sorted by RelPath (parents sort
+  before children, so extraction can create in order); RelPath is
+  project-root-relative forward-slash (`.agentmod/...`) — extraction joins
+  it to the project root via `filepath.FromSlash`.
+- **Test helpers**: validate_test.go adds `addZipMember` (append ONE
+  member with an explicit mode — hostile symlinks, fifos, setuid bits —
+  which rewriteSnapshot's fixed-mode extras cannot express) and
+  `wantNoPlan`. Hostile symlink TARGETS are made by mutating the fixture
+  link's content via rewriteSnapshot with fixChecksums=true (a symlink's
+  content IS its target, D034).

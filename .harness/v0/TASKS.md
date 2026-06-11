@@ -83,7 +83,12 @@ Add/split items freely; keep units small.
        handoff create, unpack = stub until Phase 6; T23 ✅)
 
 ## Phase 6 — restore
-- [ ] validation: schema version, checksums, zip-slip, absolute paths, symlinks (+ malicious fixtures)
+- [x] validation: schema version, checksums, zip-slip, absolute paths, symlinks (+ malicious fixtures)
+      (D041: (*Snapshot).PlanRestore in internal/handoff/validate.go —
+       problems-or-plan; schema gate shared with Verify via schemaProblem();
+       checksums stay Verify's job, restore runs Open→Verify→PlanRestore;
+       .agentmod whitelist + §21 protected elements + lexical symlink
+       containment; restore/unpack stay stubs until extraction lands)
 - [ ] backup existing .agentmod before restore (+ tests)
 - [ ] restore writes only under .agentmod/; no script execution (+ tests)
 - [ ] portability: separators, exec bits, MCP absolute-path warn/rewrite (+ tests)

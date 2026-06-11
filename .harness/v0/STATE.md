@@ -1,12 +1,14 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 8 slice 1 — §27.1–.4
-isolation-matrix scenario test with mock agent binaries, D050; T30 🟡)
+Last updated: 2026-06-11 (iteration: Phase 8 slice 2 — §27.5 A→B
+round-trip + §27.6 git-handoff scenario tests, D051; T30 ✅)
 
 ## Where things stand
-- Phase 8 STARTED: slice 1 (§27.1–§27.4 isolation matrix,
-  TestScenarioIsolationMatrix, D050; T30 🟡) done. Next: §27.5/§27.6
-  scenario slice, then docs (README etc.).
+- Phase 8 IN PROGRESS: slice 1 (§27.1–§27.4 isolation matrix,
+  TestScenarioIsolationMatrix, D050) + slice 2 (§27.5/§27.6 cli-level
+  scenario tests, D051; T30 ✅) done. Scenario coverage COMPLETE.
+  Next: README.md, then the other distribution docs, then the final
+  audit.
 - Phase 7 COMPLETE: slice 1 (git handoff tree writer, D047) + slice 2
   (sessions/logs excluded via ForGitRules, --include-sessions always
   refuses, D048; T28 ✅) + final item (pack --for-git pinned by tests;
@@ -984,6 +986,30 @@ isolation-matrix scenario test with mock agent binaries, D050; T30 🟡)
   - Gotcha (cost nothing, but know it): the dev-harness PreToolUse guard
     blocks `sed -i` command lines that mention `$HOME/.claude` — do
     test-file mutations with the Edit tool, not shell substitution.
+- §27.5/§27.6 scenario tests LANDED and green (Phase 8 slice 2 ✅, D051,
+  T30 ✅): `TestScenarioHandoffRoundTrip` + `TestScenarioGitHandoff` +
+  helper `writeAgentmodFixture` appended to scenario_test.go. ZERO
+  product code changed. Read D051 before extending scenario coverage.
+  - Shape settled per D050's "decide small": cli-level tests (no shell
+    session, no mock binaries) — §27.5/§27.6 are about package content
+    and continuation, not shell routing. Mechanics overlap MAPPED to
+    existing tests instead of duplicated (the mapping is recorded in
+    D051 and the T30 matrix row).
+  - §27.5: machine-A `.agentmod` carries CLAUDE.md + gstack skill +
+    session transcript + codex/config.toml MCP server (relative `npx`
+    command, ports cleanly) + opencode.json + BOTH sk-FAKE auth files;
+    create names exactly the two auth-file exclusions; restore on a
+    second init'd root proves continuation files byte-equal, auth
+    absent, canonical re-login block + clean-portability line, and B's
+    root gains EXACTLY {.agentmod, .agentmod.backup-<stamp>} (ReadDir
+    DeepEqual).
+  - §27.6: one fixture with all five excluded categories (source at
+    project root, .env, 2 auth files, claude/projects session,
+    .agentmod/logs); one `create --for-git` run asserts the four policy
+    exclusions by path+rule-ID (pruned dirs print with trailing "/"),
+    manifest for_git, and the payload file set EXACTLY
+    {agentmod.toml, claude/CLAUDE.md, codex/config.toml} — the
+    DeepEqual means a leak from ANY category fails the test.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -1026,32 +1052,27 @@ D050 iteration: `~/.codex` mtime drifted to 20:33 — read-only `ls`
 confirms zero agentmod-named entries (the user's own codex runtime
 churn again); `~/.claude`, `~/.config/opencode` and the skills list
 match baseline. The scenario test's fake HOME is a temp dir; the real
-homes were never touched.)
+homes were never touched. D051 iteration: `~/.codex` mtime still the
+20:33 reading; all three homes + skills list match baseline.)
 
 ## Failing tests
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 8, second item: "Scenario test: A→B handoff round-trip; git
-handoff" (§27.5 + §27.6, T30's remaining half). FIRST check overlap
-with existing coverage — much already exists: restore_test.go (A→B
-round trip incl. marker-file travel, backup, re-login block, inline
-doctor) and gitpack_test.go (tree creation, exclusions) + cli
-TestPackForGitAlias. The likely GAP for §27.5: an end-to-end
-"machine A → machine B" framing where B is a DIFFERENT fake-HOME/
-project tree restored over the same git checkout, asserting config/
-skills/gstack continue while auth is absent + re-login guidance
-prints — possibly just a thin scenario wrapper over
-pipelineForRestore (restore_test.go) or a cli-level test reusing
-digestTree/diffDigests. §27.6 likely needs only a scenario-named
-assertion that --for-git output under .agentmod-handoff/ excludes
-source/secrets/auth/sessions/logs (gitpack tests cover pieces —
-maybe one consolidated scenario test or a documented mapping in
-TEST_MATRIX). Decide small: if existing tests already prove a
-clause, record the mapping instead of duplicating code. After that:
-README.md (remember D049's manual-tree-restore limitation + D016's
-pnpm/bun-bin note + D018's non-interactive-bash note), then the
-other distribution docs, then the final audit.
+Phase 8, third item: README.md. §28 makes four limitation bullets
+MANDATORY: macOS Keychain non-isolation (§15.1/D025), OpenCode
+partial isolation (§15.3/D024), project `.claude/` native behavior,
+shell-hook first-session limitation (D020). Also include the
+recorded honest-limitation notes: D049 tree packages restore
+manually (no directory reader), D016 pnpm/bun global bins not on
+PATH, D018 hook inert in non-interactive bash scripts, D034/D040
+snapshot 0600 + verify-anywhere, D010-style global gstack warning
+behavior. Structure per GOAL: what it is / is not (Agent Home Router
++ Handoff Tool; "git moves source; agentmod moves the agent env"),
+quick start (init → hook → install gstack → pack/restore),
+limitations, FAQ. After README: LICENSE/SECURITY/CONTRIBUTING/
+CHANGELOG/CODE_OF_CONDUCT (one slice), then the final §28/§29 audit
++ DONE.md.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

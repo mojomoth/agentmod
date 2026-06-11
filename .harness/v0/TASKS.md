@@ -164,8 +164,14 @@ Add/split items freely; keep units small.
        non-stalling init auth guidance, in-session global-pollution check,
        before/after tree snapshots, XDG untouched; mutation-verified;
        T30 stays 🟡 until the §27.5/.6 slice below)
-- [ ] Scenario test: A→B handoff round-trip; git handoff (§27.5/§27.6 —
+- [x] Scenario test: A→B handoff round-trip; git handoff (§27.5/§27.6 —
       check overlap with restore_test.go/gitpack_test.go first, D050)
+      (D051: TestScenarioHandoffRoundTrip — continuation files byte-equal
+       on B, auth absent, re-login block, root gains only
+       .agentmod+backup; TestScenarioGitHandoff — all five §27.6
+       exclusion categories in one --for-git run, payload file set
+       pinned by DeepEqual; cli-level, no shell session; mechanics
+       overlap mapped to existing tests instead of duplicated; T30 ✅)
 - [ ] README.md (what it is/is not, quick start, limitations, FAQ)
 - [ ] LICENSE, SECURITY.md, CONTRIBUTING.md, CHANGELOG.md, CODE_OF_CONDUCT.md
 - [ ] Final §28/§29 audit + final report + DONE.md

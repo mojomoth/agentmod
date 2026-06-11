@@ -8,16 +8,24 @@ package cli
 // $HOME, OPENCODE_CONFIG with no fallback) — real agent installs are never
 // required or touched (GOAL quality bar).
 //
-// §27.5 (A→B handoff round trip) and §27.6 (git handoff) are the second
-// scenario slice; restore_test.go and gitpack_test.go already cover their
-// mechanics outside a shell session.
+// §27.5 (TestScenarioHandoffRoundTrip) and §27.6 (TestScenarioGitHandoff)
+// are cli-level: the handoff clauses are about package content and
+// continuation, not shell routing, and their backup/format mechanics are
+// already pinned by handoff_test.go / restore_test.go / gitpack_test.go —
+// these two tests pin the §27 framing (continuation-vs-auth split; all
+// five git-exclusion categories in one run) end to end.
 
 import (
+	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/agentmod/agentmod/internal/config"
+	"github.com/agentmod/agentmod/internal/handoff"
 )
 
 // mockAgentBins writes fake claude/codex/opencode executables into a fresh
@@ -229,5 +237,184 @@ func TestScenarioIsolationMatrix(t *testing.T) {
 				diffTrees(t, dir, before[i], snapshotTree(t, dir))
 			}
 		})
+	}
+}
+
+// writeAgentmodFixture writes content files (rel → bytes) under
+// <root>/.agentmod, creating parent dirs as needed.
+func writeAgentmodFixture(t *testing.T, root string, files map[string]string) {
+	t.Helper()
+	for rel, content := range files {
+		path := filepath.Join(root, ".agentmod", rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestScenarioHandoffRoundTrip(t *testing.T) {
+	// §27.5 — create a handoff package on "machine A", restore it on
+	// "machine B" over the same git checkout (git moves the source; the
+	// .amod moves the agent env). Config, the gstack skill, MCP config,
+	// and working context continue; auth never travels; re-login guidance
+	// prints.
+	srcRoot := makeProject(t, config.Default())
+
+	// What §27.5 says must continue "to the extent possible"…
+	travels := map[string]string{
+		filepath.Join("claude", "CLAUDE.md"):                         "machine A claude instructions\n",
+		filepath.Join("claude", "skills", "gstack", "SKILL.md"):      "# gstack fixture\n",
+		filepath.Join("claude", "projects", "demo", "session.jsonl"): `{"role":"user","text":"context from machine A"}` + "\n",
+		// MCP server with a relative command — ports cleanly (D044).
+		filepath.Join("codex", "config.toml"):      "[mcp_servers.demo]\ncommand = \"npx\"\nargs = [\"-y\", \"demo-mcp\"]\n",
+		filepath.Join("opencode", "opencode.json"): "{}\n",
+	}
+	// …and what must never travel (§18).
+	authRel := []string{
+		filepath.Join("claude", ".credentials.json"),
+		filepath.Join("codex", "auth.json"),
+	}
+	writeAgentmodFixture(t, srcRoot, travels)
+	for _, rel := range authRel {
+		writeAgentmodFixture(t, srcRoot, map[string]string{rel: `{"token":"sk-FAKE-fixture"}`})
+	}
+
+	output := filepath.Join(t.TempDir(), "machine-a.amod")
+	code, stdout, stderr := runHandoffForTest(t, fakeEnv(srcRoot, nil), "create", "--output", output)
+	if code != ExitOK {
+		t.Fatalf("create exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	wantContains(t, "create stdout", stdout,
+		"excluded by default policy: 2 entries",
+		".agentmod/claude/.credentials.json (auth-file)",
+		".agentmod/codex/auth.json (auth-file)",
+	)
+
+	// "Machine B": the same checkout, so the project (with its own init'd
+	// .agentmod) already exists; only the agent env arrives via agentmod.
+	dstRoot := makeProject(t, config.Default())
+	code, stdout, stderr = runHandoffForTest(t, fakeEnv(dstRoot, nil), "restore", output)
+	if code != ExitOK {
+		t.Fatalf("restore exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+
+	for rel, content := range travels {
+		data, err := os.ReadFile(filepath.Join(dstRoot, ".agentmod", rel))
+		if err != nil || string(data) != content {
+			t.Errorf("%s did not continue on machine B: %q, %v", rel, data, err)
+		}
+	}
+	for _, rel := range authRel {
+		if _, err := os.Lstat(filepath.Join(dstRoot, ".agentmod", rel)); !os.IsNotExist(err) {
+			t.Errorf("auth file %s present on machine B (err = %v), want absent", rel, err)
+		}
+	}
+	wantContains(t, "restore stdout", stdout,
+		"Re-login (auth and credentials never travel in a snapshot",
+		"Claude Code: "+handoff.ClaudeReloginRemedy+".",
+		"Codex CLI: "+handoff.CodexReloginRemedy+".",
+		"portability: no foreign absolute paths in restored agent configs",
+	)
+
+	// Restore touched nothing at the project root beyond .agentmod and its
+	// backup (machine B's checkout here is not a git repo, so no .gitignore
+	// appears either).
+	entries, err := os.ReadDir(dstRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	wantNames := []string{".agentmod", ".agentmod.backup-" + fakeNow.Format("20060102-150405")}
+	if !reflect.DeepEqual(names, wantNames) {
+		t.Errorf("machine B project root after restore = %v, want %v", names, wantNames)
+	}
+}
+
+func TestScenarioGitHandoff(t *testing.T) {
+	// §27.6 — `handoff create --for-git` produces a git-storable tree under
+	// .agentmod-handoff/ excluding source code, secrets, auth, sessions,
+	// and logs by default: all five categories pinned in one run. (Format
+	// mechanics live in gitpack_test.go; the `pack --for-git` spelling in
+	// TestPackForGitAlias.)
+	root := makeProject(t, config.Default())
+	// Source code lives at the project root — git's job, structurally
+	// outside the payload.
+	for name, content := range map[string]string{
+		"main.go":   "package main\n",
+		"README.md": "# demo\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keep := map[string]string{
+		filepath.Join("claude", "CLAUDE.md"):  "instructions travel\n",
+		filepath.Join("codex", "config.toml"): "[mcp_servers.demo]\ncommand = \"npx\"\n",
+	}
+	drop := map[string]string{
+		filepath.Join("claude", ".env"):                              "API_KEY=sk-FAKE-fixture\n",   // secrets
+		filepath.Join("claude", ".credentials.json"):                 `{"token":"sk-FAKE-fixture"}`, // auth
+		filepath.Join("codex", "auth.json"):                          `{"token":"sk-FAKE-fixture"}`, // auth
+		filepath.Join("claude", "projects", "demo", "session.jsonl"): `{"text":"history"}` + "\n",   // sessions
+		filepath.Join("logs", "agentmod.log"):                        "log line\n",                  // logs
+	}
+	writeAgentmodFixture(t, root, keep)
+	writeAgentmodFixture(t, root, drop)
+
+	code, stdout, stderr := runHandoffForTest(t, fakeEnv(root, nil), "create", "--for-git")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	wantContains(t, "stdout", stdout,
+		".agentmod/claude/.env (env-file)",
+		".agentmod/claude/.credentials.json (auth-file)",
+		".agentmod/codex/auth.json (auth-file)",
+		".agentmod/claude/projects/ (session-data)",
+		".agentmod/logs/ (log-data)",
+	)
+
+	target := filepath.Join(root, handoff.GitDirName)
+	var m handoff.Manifest
+	data, err := os.ReadFile(filepath.Join(target, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatal(err)
+	}
+	if !m.ForGit {
+		t.Error("manifest for_git = false, want true")
+	}
+
+	// The packed payload carries the agent env and NOTHING else: exactly
+	// the two keepers plus the project's agentmod.toml, no source file, no
+	// member of any excluded category.
+	payload := filepath.Join(target, "payload")
+	var rels []string
+	err = fs.WalkDir(os.DirFS(payload), ".", func(rel string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			rels = append(rels, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRels := []string{
+		".agentmod/agentmod.toml",
+		".agentmod/claude/CLAUDE.md",
+		".agentmod/codex/config.toml",
+	}
+	if !reflect.DeepEqual(rels, wantRels) {
+		t.Errorf("payload files = %v, want %v", rels, wantRels)
 	}
 }

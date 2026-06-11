@@ -1462,3 +1462,41 @@ stub gone). Read D034+D040–D044+this before touching restore output.
 - **T30 stays 🟡**: §27.5 (A→B round trip) + §27.6 (git handoff) are the
   second slice — check overlap with restore_test.go/gitpack_test.go
   round-trip coverage before writing new code (much already exists).
+
+## D051 — 2026-06-11 — §27 scenario slice 2: A→B round trip + git handoff as cli-level tests (T30 done)
+
+- **Shape settled per D050's "decide small"**: §27.5/§27.6 are about
+  package CONTENT and continuation, not shell routing — so the slice is
+  two cli-level tests in scenario_test.go (no shell session, no mock
+  binaries), reusing makeProject/fakeEnv/runHandoffForTest/wantContains.
+  The shell-session machinery stays exclusive to §27.1–.4 where routing
+  is the thing under test.
+- **`TestScenarioHandoffRoundTrip` (§27.5)**: "machine A" project carries
+  claude/CLAUDE.md, the gstack skill, a session transcript (working
+  context), an MCP server in codex/config.toml (relative `npx` command —
+  ports cleanly), opencode.json, PLUS both auth files (sk-FAKE). Create
+  names exactly the two auth-file exclusions; restore onto "machine B"
+  (same checkout framing: a second init'd project root) proves every
+  continuation file arrives byte-equal, both auth files are absent
+  (Lstat IsNotExist), the canonical re-login block + clean-portability
+  line print, and B's project root gains EXACTLY {.agentmod,
+  .agentmod.backup-<stamp>} — git moves source, agentmod moves the env.
+- **`TestScenarioGitHandoff` (§27.6)**: one fixture holds all five
+  excluded categories (source at project root, .env secret, 2 auth
+  files, claude/projects session, .agentmod/logs log) plus two keepers;
+  one `create --for-git` run asserts the four policy exclusions by
+  path+rule-ID on stdout, manifest for_git, and — the load-bearing
+  assertion — the payload file set is EXACTLY {agentmod.toml, CLAUDE.md,
+  codex/config.toml} (DeepEqual), so any leak from any category fails.
+  Source exclusion is structural (payload root is .agentmod only) and
+  this pins it observationally.
+- **Coverage mapping recorded instead of duplication** (D049 spirit):
+  backup/rollback/gitignore/doctor mechanics → restore_test.go + cli
+  round trip; tree format/checksums/replace → gitpack_test.go; `pack
+  --for-git` spelling → TestPackForGitAlias; sessions-stay-in-.amod →
+  TestCreateStillPacksSessionsAndLogs. New helper
+  `writeAgentmodFixture(t, root, files)` — reuse for future cli
+  fixtures. ZERO product code changed.
+- **T30 flips ✅** — Phase 8 continues with README.md (remember: D049
+  manual tree restore, D016 pnpm/bun bins off PATH, D018 non-interactive
+  bash, §28's four mandatory limitation bullets).

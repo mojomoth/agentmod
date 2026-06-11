@@ -1,13 +1,15 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 7 slice 1 — `handoff create
---for-git` tree package under .agentmod-handoff/, D047; T28 🟡)
+Last updated: 2026-06-11 (iteration: Phase 7 slice 2 — ForGit
+session/log exclusion + --include-sessions encryption refusal, D048;
+T28 ✅)
 
 ## Where things stand
-- Phase 7 IN PROGRESS: slice 1 landed (git handoff tree writer, D047).
-  NEXT SLICE OWNS: sessions/logs exclusion for --for-git +
-  --include-sessions encryption refusal — until it lands, --for-git
-  packages still carry sessions/logs and must not be called session-safe.
+- Phase 7 IN PROGRESS: slice 1 (git handoff tree writer, D047) +
+  slice 2 (sessions/logs excluded in --for-git via ForGitRules,
+  --include-sessions always refuses, D048; T28 ✅). --for-git is now
+  session-safe. Remaining Phase 7 items: pack --for-git alias test;
+  optional tree-package reader (decide scope when reached, D047).
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
   both shell hooks + rc editor + env-hygiene integration tests + the
   first-session diagnosis). Phase 3 COMPLETE (six doctor slices + guard
@@ -905,6 +907,39 @@ Last updated: 2026-06-11 (iteration: Phase 7 slice 1 — `handoff create
     --for-git → tree layout + shasum -c OK → replace run → foreign-dir
     refusal → --allow-findings conflict message; no partial/old
     leftovers.
+- ForGit session/log exclusion + --include-sessions refusal LANDED and
+  green (Phase 7 slice 2 ✅, D048, T28 ✅): `ForGitRules()` +
+  `sessionDataRule`/`logDataRule` in exclude.go; CreateForGit applies it
+  when opts.Rules is nil; `--include-sessions` parsed and ALWAYS refused
+  in runHandoffCreate's flag validation. Read D048 (+D035/D047) before
+  touching git-handoff exclusion code.
+  - Rules path-anchored to the routed homes (targets verified against
+    the REAL agent installs on this machine, read-only ls — see D048 for
+    the full list): claude projects/sessions/session-env/file-history/
+    shell-snapshots/history.jsonl, codex sessions/shell_snapshots/
+    history.jsonl/session_index.jsonl/log//logs_*.sqlite*, opencode
+    xdg/data + xdg/state, .agentmod/logs. Working context (codex
+    memories, claude plans/tasks, sqlite state) deliberately KEPT —
+    §19 mandates only sessions/logs. Default rules first (D035 most-
+    security-relevant ordering); .amod create provably untouched.
+  - --include-sessions without --for-git → "only meaningful with
+    --for-git" (regular snapshots already include sessions); with it →
+    the §19 encryption explanation. Both before any FS work.
+  - Git-mode HANDOFF.md gained the sessions/logs "What is missing"
+    bullet (absent from .amod docs, asserted); REDACTION.md names the
+    new rule IDs with zero code change. Usage text updated (cli.go).
+  - Tests: TestForGitRulesTable (29 rows incl. lookalikes-kept +
+    anchoring + first-match), mkSessionFixture +
+    TestCreateForGitExcludesSessionsAndLogs (payload absence, exact
+    Excluded rule IDs, REDACTION/HANDOFF anchors, survivors) +
+    TestCreateStillPacksSessionsAndLogs (.amod keeps all session/log
+    files, no git-only rule fires, no git-mode doc wording); cli
+    conflict table grew the two --include-sessions rows + a
+    nothing-created-in-snapshots/ assertion for all rows. Binary smoke
+    in /tmp passed: --for-git excluded 6 session/log entries by name +
+    rule ID, payload carried only working context, both refusals exit 1
+    with the right messages, regular .amod packed all 4 session/log
+    files.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -938,28 +973,24 @@ Later same day: `~/.codex` mtime 6월 11 02:28, same verdict. And again
 16:44, then 19:15 — skills list + other two homes still match baseline.
 D046 iteration re-verified: all three homes + skills list unchanged from
 the 19:15 reading. D047 iteration: same — `~/.codex` mtime still 19:15,
-all three homes + skills list match baseline.)
+all three homes + skills list match baseline. D048 iteration: same —
+all three homes + skills list match baseline; the session-target
+research used read-only `ls` of the global homes, zero writes.)
 
 ## Failing tests
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 7, slice 2: "sessions/logs excluded; --include-sessions fails w/
-encryption explanation" (T28 row). Read FABLE_PLAN §19 + §15 (where each
-agent stores sessions) + D035/D047 before coding. Notes:
-- Shape: a ForGit rule set layered on DefaultRules() (D035's Rule list
-  makes this cheap) wired through CreateOptions.Rules by the cli when
-  --for-git is set — or a dedicated ForGitRules() helper in exclude.go;
-  decide and record. Candidate targets to RESEARCH first (don't guess):
-  .agentmod/logs/ (ours), claude/projects/ + history/session artifacts,
-  codex/sessions/ + history.jsonl + log/, opencode xdg data when
-  xdg_full_isolation is on. REDACTION.md should name the new rule IDs.
-- `--include-sessions` parses ONLY with --for-git (decide: reject it for
-  normal create, which already includes sessions) and must FAIL with the
-  §19 encryption explanation (MVP ships no encryption).
-- Update the git-mode HANDOFF.md "What is missing" section to state the
-  sessions/logs exclusion once it is true; T28 flips ✅ only after both
-  this slice's halves are tested.
+Phase 7, next item: "pack --for-git alias (+ tests)". `pack` already
+dispatches to runHandoffCreate with the same parser, so `pack --for-git`
+WORKS today (D048) — the task is a test pinning it (FABLE_PLAN §19 names
+`agentmod pack --for-git` as a required command) plus any usage-text
+gap. Likely one small cli test (reuse TestHandoffCreateForGit's
+assertions through the `pack` top-level command) — consider batching it
+with the LAST Phase 7 item's scope decision (tree-package reader for
+inspect/verify/restore: NOT in GOAL §29; D047 says decide-and-record
+either way when reached; if skipped, record the decision and leave the
+honesty notes in the git-mode docs as-is).
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

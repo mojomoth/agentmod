@@ -54,7 +54,10 @@ Commands:
               handoff create --for-git writes the same members as a
               committable plain-file tree under .agentmod-handoff/ instead
               (replacing a previous package there; incompatible with
-              --output and --allow-findings);
+              --output and --allow-findings; sessions, history, and logs
+              are additionally excluded, and --include-sessions refuses
+              because committed sessions would need encryption, which
+              this version does not implement);
               handoff inspect FILE prints the manifest and redaction
               report without extracting; handoff verify FILE re-hashes
               every member against its checksums and exits 3 on mismatch;

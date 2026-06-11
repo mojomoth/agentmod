@@ -3,10 +3,10 @@
 // the redaction report can explain each exclusion verbatim; Create records
 // what each rule dropped in Result.Excluded.
 //
-// Deliberately NOT excluded here: sessions and logs/ stay in normal
-// handoffs (they are excluded only in --for-git mode, Phase 7), and the
-// secret-candidate content scan is its own slice — these rules match on
-// names and paths only.
+// Deliberately NOT excluded by DefaultRules: sessions and logs/ stay in
+// normal handoffs and are dropped only by ForGitRules (FABLE_PLAN §19);
+// the secret-candidate content scan is its own layer — these rules match
+// on names and paths only.
 
 package handoff
 
@@ -146,6 +146,79 @@ func DefaultRules() []Rule {
 			Matches: func(_, base string, isDir bool) bool {
 				return isDir && (base == "tmp" || base == ".tmp")
 			},
+		},
+	}
+}
+
+// ForGitRules returns the exclusion policy for git-storable handoff
+// packages (FABLE_PLAN §19): everything DefaultRules drops, plus agent
+// sessions/history and log files — a committed package is published with
+// the repository, so per-machine conversation history must never travel in
+// it. The default rules come first so an entry matched by both (an auth
+// file inside a session dir's parent, say) is still reported under the
+// most security-relevant ID (D035). CreateForGit applies these when
+// CreateOptions.Rules is nil.
+func ForGitRules() []Rule {
+	return append(DefaultRules(), sessionDataRule(), logDataRule())
+}
+
+// sessionDataRule matches the session/history locations each agent
+// actually uses inside its routed home (verified against real installs:
+// claude 2.x, codex-cli 0.13x, opencode 1.4 — D048). Path-anchored so a
+// user directory merely NAMED "sessions" elsewhere stays in.
+func sessionDataRule() Rule {
+	claude := project.DirName + "/" + layout.ClaudeDir
+	codex := project.DirName + "/" + layout.CodexDir
+	xdg := project.DirName + "/" + layout.OpencodeDir + "/" + layout.OpencodeXDGDir
+	sessionDirs := map[string]bool{
+		claude + "/projects":        true, // per-project session transcripts
+		claude + "/sessions":        true,
+		claude + "/session-env":     true,
+		claude + "/file-history":    true,
+		claude + "/shell-snapshots": true,
+		codex + "/sessions":         true, // rollout files
+		codex + "/shell_snapshots":  true,
+		// OpenCode keeps sessions/storage in the XDG data dir and state in
+		// the XDG state dir (opt-in xdg_full_isolation mode routes them
+		// here; in default partial isolation these simply do not exist).
+		xdg + "/data":  true,
+		xdg + "/state": true,
+	}
+	sessionFiles := map[string]bool{
+		claude + "/history.jsonl":      true,
+		codex + "/history.jsonl":       true,
+		codex + "/session_index.jsonl": true,
+	}
+	return Rule{
+		ID:     "session-data",
+		Reason: "agent sessions and history never travel in a git handoff — a committed package is published with the repository (FABLE_PLAN §19); pack a regular .amod snapshot to carry them privately",
+		Matches: func(relPath, _ string, isDir bool) bool {
+			if isDir {
+				return sessionDirs[relPath]
+			}
+			return sessionFiles[relPath]
+		},
+	}
+}
+
+// logDataRule matches agentmod's own logs/ plus Codex's log dir and its
+// logs_<n>.sqlite databases (with -shm/-wal sidecars) directly under the
+// Codex home.
+func logDataRule() Rule {
+	codex := project.DirName + "/" + layout.CodexDir
+	logDirs := map[string]bool{
+		project.DirName + "/" + layout.LogsDir: true,
+		codex + "/log":                         true,
+	}
+	return Rule{
+		ID:     "log-data",
+		Reason: "log files never travel in a git handoff (FABLE_PLAN §19)",
+		Matches: func(relPath, base string, isDir bool) bool {
+			if isDir {
+				return logDirs[relPath]
+			}
+			return relPath == codex+"/"+base &&
+				strings.HasPrefix(base, "logs_") && strings.Contains(base, ".sqlite")
 		},
 	}
 }

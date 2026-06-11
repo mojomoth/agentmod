@@ -97,6 +97,12 @@ func (s *treeSink) Close() error {
 // intact.
 func CreateForGit(opts CreateOptions) (*Result, error) {
 	opts.ForGit = true // the tree format owns the flag
+	if opts.Rules == nil {
+		// §19 default for the committable format: sessions/logs excluded on
+		// top of the regular policy. An explicitly non-nil Rules slice is
+		// honored as-is, same as Create (the pinned escape hatch, D035).
+		opts.Rules = ForGitRules()
+	}
 	agentmodDir := filepath.Join(opts.ProjectRoot, project.DirName)
 	if fi, err := os.Lstat(agentmodDir); err != nil {
 		return nil, fmt.Errorf("handoff create --for-git: %w", err)

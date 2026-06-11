@@ -283,6 +283,133 @@ func TestCreateForGitHardFindingFreshRunLeavesNothing(t *testing.T) {
 	}
 }
 
+// mkSessionFixture extends the standard fixture with one representative of
+// every session/log location ForGitRules drops, next to working context
+// that must survive in both formats.
+func mkSessionFixture(t *testing.T) string {
+	t.Helper()
+	root := mkFixtureProject(t)
+	am := filepath.Join(root, ".agentmod")
+	for rel, content := range map[string]string{
+		filepath.Join("claude", "projects", "p1", "chat.jsonl"):                   `{"role":"user"}` + "\n",
+		filepath.Join("claude", "history.jsonl"):                                  `{"display":"hi"}` + "\n",
+		filepath.Join("claude", "session-env", "abc"):                             "ENV=1\n",
+		filepath.Join("codex", "sessions", "rollout.jsonl"):                       `{"role":"user"}` + "\n",
+		filepath.Join("codex", "history.jsonl"):                                   `{"text":"hi"}` + "\n",
+		filepath.Join("codex", "session_index.jsonl"):                             `{"id":"s1"}` + "\n",
+		filepath.Join("codex", "log", "codex.log"):                                "log line\n",
+		filepath.Join("codex", "logs_2.sqlite"):                                   "FAKE-sqlite",
+		filepath.Join("logs", "agentmod.log"):                                     "log line\n",
+		filepath.Join("opencode", "xdg", "data", "opencode", "storage", "s.json"): `{"session":1}`,
+		filepath.Join("codex", "memories", "notes.md"):                            "# keep me\n",
+	} {
+		p := filepath.Join(am, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func TestCreateForGitExcludesSessionsAndLogs(t *testing.T) {
+	root := mkSessionFixture(t)
+	res := createGitForTest(t, root)
+	target := filepath.Join(root, GitDirName)
+
+	// None of the session/log artifacts may exist in the payload tree.
+	for _, rel := range []string{
+		"claude/projects", "claude/history.jsonl", "claude/session-env",
+		"codex/sessions", "codex/history.jsonl", "codex/session_index.jsonl",
+		"codex/log", "codex/logs_2.sqlite", "logs",
+		"opencode/xdg/data",
+	} {
+		p := filepath.Join(target, "payload", ".agentmod", filepath.FromSlash(rel))
+		if _, err := os.Lstat(p); !os.IsNotExist(err) {
+			t.Errorf("payload still contains %s (err=%v)", rel, err)
+		}
+	}
+	// Working context survives.
+	for _, rel := range []string{"agentmod.toml", "claude/settings.json", "codex/memories/notes.md"} {
+		p := filepath.Join(target, "payload", ".agentmod", filepath.FromSlash(rel))
+		if _, err := os.Lstat(p); err != nil {
+			t.Errorf("payload lost %s: %v", rel, err)
+		}
+	}
+
+	// Every drop is recorded under the right rule ID, pruned dirs once with
+	// a trailing slash.
+	got := map[string]string{}
+	for _, e := range res.Excluded {
+		got[e.Path] = e.RuleID
+	}
+	for path, rule := range map[string]string{
+		".agentmod/claude/projects/":          "session-data",
+		".agentmod/claude/history.jsonl":      "session-data",
+		".agentmod/claude/session-env/":       "session-data",
+		".agentmod/codex/sessions/":           "session-data",
+		".agentmod/codex/history.jsonl":       "session-data",
+		".agentmod/codex/session_index.jsonl": "session-data",
+		".agentmod/codex/log/":                "log-data",
+		".agentmod/codex/logs_2.sqlite":       "log-data",
+		".agentmod/logs/":                     "log-data",
+		".agentmod/opencode/xdg/data/":        "session-data",
+	} {
+		if got[path] != rule {
+			t.Errorf("Excluded[%s] = %q, want %q", path, got[path], rule)
+		}
+	}
+
+	// REDACTION.md names the new rule IDs so a recipient sees what was
+	// dropped and why.
+	redaction := string(mustRead(t, filepath.Join(target, RedactionName)))
+	for _, want := range []string{"session-data", "log-data", ".agentmod/codex/sessions/"} {
+		if !strings.Contains(redaction, want) {
+			t.Errorf("REDACTION.md missing %q", want)
+		}
+	}
+	// HANDOFF.md states the exclusion in prose.
+	handoffDoc := string(mustRead(t, filepath.Join(target, HandoffDocName)))
+	if !strings.Contains(handoffDoc, "Sessions, history, and logs never travel in a git handoff") {
+		t.Errorf("git HANDOFF.md missing the sessions/logs exclusion statement:\n%s", handoffDoc)
+	}
+}
+
+// TestCreateStillPacksSessionsAndLogs pins the §18/§19 split: the regular
+// .amod format carries sessions and logs (moving them is the point of a
+// private handoff); only the committable git format drops them.
+func TestCreateStillPacksSessionsAndLogs(t *testing.T) {
+	root := mkSessionFixture(t)
+	output := filepath.Join(t.TempDir(), "snap.amod")
+	res := createForTest(t, root, output)
+
+	zr := openSnapshot(t, output)
+	names := map[string]bool{}
+	for _, f := range zr.File {
+		names[f.Name] = true
+	}
+	for _, rel := range []string{
+		"claude/projects/p1/chat.jsonl", "claude/history.jsonl",
+		"codex/sessions/rollout.jsonl", "codex/history.jsonl",
+		"codex/log/codex.log", "codex/logs_2.sqlite", "logs/agentmod.log",
+	} {
+		if !names["payload/.agentmod/"+rel] {
+			t.Errorf(".amod snapshot lost session/log file %s", rel)
+		}
+	}
+	for _, e := range res.Excluded {
+		if e.RuleID == "session-data" || e.RuleID == "log-data" {
+			t.Errorf(".amod create applied git-only rule %s to %s", e.RuleID, e.Path)
+		}
+	}
+	// The .amod HANDOFF.md must not claim the git-mode exclusion.
+	if strings.Contains(string(readMember(t, zr, HandoffDocName)), "never travel in a git handoff") {
+		t.Error(".amod HANDOFF.md carries the git-mode sessions statement")
+	}
+}
+
 func TestCreateForGitDocsDescribeTreePackage(t *testing.T) {
 	root := mkFixtureProject(t)
 	createGitForTest(t, root)

@@ -67,6 +67,9 @@ func renderHandoffDoc(createdAt time.Time, version, platform, projectName string
 		fmt.Fprintf(&b, "- Secret scan: %s in packed files — review `REDACTION.md`\n  before sharing this snapshot.\n",
 			countNoun(len(res.Findings), "candidate finding", "candidate findings"))
 	}
+	if forGit {
+		b.WriteString("- Sessions, history, and logs never travel in a git handoff — a\n  committed package is published with the repository. Pack a regular\n  `.amod` snapshot (`agentmod handoff create`) to carry them privately.\n")
+	}
 	b.WriteString("- Auth and credentials never travel; every agent needs a fresh login\n  on the target machine (see `RESTORE.md`).\n")
 	b.WriteString("- A gstack install travels without its `.git` directory (excluded);\n  run `agentmod install gstack --force` after restoring.\n")
 	b.WriteString("- npm global-tool symlinks under `.agentmod/node/bin` may dangle\n  because `lib/node_modules` is excluded; reinstall those tools after\n  restoring.\n")

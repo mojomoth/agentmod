@@ -88,6 +88,71 @@ func TestDefaultRulesTable(t *testing.T) {
 	}
 }
 
+// matchForGitRules is matchDefaultRules over ForGitRules.
+func matchForGitRules(relPath string, isDir bool) string {
+	base := relPath[strings.LastIndex(relPath, "/")+1:]
+	for _, r := range ForGitRules() {
+		if r.Matches(relPath, base, isDir) {
+			return r.ID
+		}
+	}
+	return ""
+}
+
+func TestForGitRulesTable(t *testing.T) {
+	cases := []struct {
+		relPath string
+		isDir   bool
+		want    string // rule ID, "" = kept
+	}{
+		// Claude session/history artifacts (path-anchored to the routed home).
+		{".agentmod/claude/projects", true, "session-data"},
+		{".agentmod/claude/sessions", true, "session-data"},
+		{".agentmod/claude/session-env", true, "session-data"},
+		{".agentmod/claude/file-history", true, "session-data"},
+		{".agentmod/claude/shell-snapshots", true, "session-data"},
+		{".agentmod/claude/history.jsonl", false, "session-data"},
+		// Codex session/history artifacts.
+		{".agentmod/codex/sessions", true, "session-data"},
+		{".agentmod/codex/shell_snapshots", true, "session-data"},
+		{".agentmod/codex/history.jsonl", false, "session-data"},
+		{".agentmod/codex/session_index.jsonl", false, "session-data"},
+		// OpenCode XDG data/state (opt-in xdg_full_isolation routing).
+		{".agentmod/opencode/xdg/data", true, "session-data"},
+		{".agentmod/opencode/xdg/state", true, "session-data"},
+		// Logs: ours, Codex's log dir, Codex's logs_<n>.sqlite databases.
+		{".agentmod/logs", true, "log-data"},
+		{".agentmod/codex/log", true, "log-data"},
+		{".agentmod/codex/logs_2.sqlite", false, "log-data"},
+		{".agentmod/codex/logs_2.sqlite-shm", false, "log-data"},
+		{".agentmod/codex/logs_2.sqlite-wal", false, "log-data"},
+		// Anchoring: same names elsewhere are user content and stay in.
+		{".agentmod/claude/skills/gstack/sessions", true, ""},
+		{".agentmod/codex/memories/history.jsonl", false, ""},
+		{".agentmod/codex/vendor/logs_2.sqlite", false, ""},
+		{".agentmod/opencode/xdg/config", true, ""},
+		// Files where only directories match (and vice versa) stay in.
+		{".agentmod/codex/log", false, ""},
+		{".agentmod/claude/projects", false, ""},
+		// The default rules still apply (and still win first-match).
+		{".agentmod/claude/.credentials.json", false, "auth-file"},
+		{".agentmod/codex/tmp", true, "tmp"},
+		// Working context that must keep traveling in git handoffs.
+		{".agentmod/agentmod.toml", false, ""},
+		{".agentmod/claude/settings.json", false, ""},
+		{".agentmod/codex/memories", true, ""},
+	}
+	for _, tc := range cases {
+		kind := "file"
+		if tc.isDir {
+			kind = "dir"
+		}
+		if got := matchForGitRules(tc.relPath, tc.isDir); got != tc.want {
+			t.Errorf("%s %s: matched %q, want %q", kind, tc.relPath, got, tc.want)
+		}
+	}
+}
+
 // mkHostileFixture extends the standard fixture with one representative of
 // every default-excluded category next to content that must survive.
 func mkHostileFixture(t *testing.T) string {

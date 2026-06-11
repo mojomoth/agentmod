@@ -1349,3 +1349,45 @@ stub gone). Read D034+D040–D044+this before touching restore output.
 - **NOT YET in slice 1**: sessions/logs still travel (next slice owns
   the ForGit rule set + `--include-sessions` encryption refusal) —
   --for-git must not be described as session-safe until then (T28 🟡).
+
+## D048 — 2026-06-11 — ForGit session/log exclusion + --include-sessions refusal (Phase 7 slice 2)
+
+- **Shape: `ForGitRules()` in exclude.go** = `append(DefaultRules(),
+  sessionDataRule(), logDataRule())` — a layered rule set, not a flag on
+  the engine. Default rules stay FIRST so multi-matched entries report
+  under the most security-relevant ID (D035 ordering). `CreateForGit`
+  applies it when `CreateOptions.Rules == nil`; an explicitly non-nil
+  Rules slice is honored as-is (same pinned escape hatch as Create).
+  The cli never sets Rules, so the §19 default always holds for
+  `--for-git`.
+- **Targets RESEARCHED, not guessed** — verified against the real agent
+  homes on this machine (claude 2.x, codex-cli 0.13x, opencode 1.4),
+  read-only `ls`. All rules are PATH-ANCHORED to the routed homes so a
+  user dir merely named "sessions" elsewhere stays in:
+  - `session-data` dirs: claude/{projects, sessions, session-env,
+    file-history, shell-snapshots}, codex/{sessions, shell_snapshots},
+    opencode/xdg/{data, state} (XDG opt-in mode; absent in partial
+    isolation). Files: claude/history.jsonl, codex/history.jsonl,
+    codex/session_index.jsonl.
+  - `log-data` dirs: .agentmod/logs (ours), codex/log. Files: anchored
+    `logs_*.sqlite*` pattern directly under the codex home (the
+    version-numbered `logs_2.sqlite` + -shm/-wal sidecars; a name
+    pattern because the number drifts across codex versions).
+  - Deliberately KEPT: codex/memories*, goals/state sqlite, claude
+    plans/tasks — working context is what a handoff is FOR; §19
+    mandates only sessions/logs.
+- **`--include-sessions` always refuses (two distinct messages)**:
+  without `--for-git` → "only meaningful with --for-git: a regular
+  .amod snapshot already includes sessions and logs"; with it → the §19
+  explanation (committed package is published with the repository →
+  sessions would need encryption → this version implements none → use a
+  regular .amod to move sessions privately). Both fire in flag
+  validation BEFORE any FS work (tested: no package, no snapshot).
+- **Git-mode HANDOFF.md** gained a "What is missing" bullet stating the
+  sessions/history/logs exclusion + the .amod alternative; the .amod
+  rendering is unchanged (asserted absent). REDACTION.md needed no code
+  change — it renders Excluded entries with rule IDs already.
+- **T28 ✅**: both halves tested (gitpack_test.go end-to-end exclusion +
+  .amod-still-packs-sessions pin + ForGitRules table; cli conflict rows).
+  `pack --for-git` already WORKS (pack ≡ handoff create, same parser);
+  its dedicated test is the remaining Phase 7 TASKS item.

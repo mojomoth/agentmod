@@ -272,6 +272,10 @@ func TestHandoffCreateForGitFlagConflicts(t *testing.T) {
 	}{
 		{"output", []string{"create", "--for-git", "--output", "x.amod"}, "--output cannot be combined with --for-git"},
 		{"allow-findings", []string{"create", "--allow-findings", "--for-git"}, "--allow-findings cannot be combined with --for-git"},
+		// §19: sessions in a committed package require encryption, which the
+		// MVP does not implement — the refusal must say why.
+		{"include-sessions with for-git", []string{"create", "--for-git", "--include-sessions"}, "does not implement encryption"},
+		{"include-sessions without for-git", []string{"create", "--include-sessions"}, "only meaningful with --for-git"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -282,6 +286,9 @@ func TestHandoffCreateForGitFlagConflicts(t *testing.T) {
 			wantContains(t, "stderr", stderr, tc.want)
 			if _, err := os.Lstat(filepath.Join(root, handoff.GitDirName)); !os.IsNotExist(err) {
 				t.Errorf("rejected invocation created %s (err=%v)", handoff.GitDirName, err)
+			}
+			if entries, err := os.ReadDir(filepath.Join(root, ".agentmod", "snapshots")); err == nil && len(entries) != 0 {
+				t.Errorf("rejected invocation created %d snapshot entr(ies)", len(entries))
 			}
 		})
 	}

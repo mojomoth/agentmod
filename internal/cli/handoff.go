@@ -42,13 +42,16 @@ func runHandoff(args []string, stdout, stderr io.Writer, env Env) int {
 // [--allow-findings] [--allow-dirty] [--for-git]`: pack this project's
 // .agentmod/ into a .amod snapshot (handoff.Create), or — with --for-git —
 // into the committable plain-file tree at .agentmod-handoff/
-// (handoff.CreateForGit, FABLE_PLAN §19). The default .amod output is
+// (handoff.CreateForGit, FABLE_PLAN §19; sessions/logs additionally
+// excluded there, and --include-sessions always refuses because the MVP
+// ships no encryption). The default .amod output is
 // .agentmod/snapshots/<project>-<timestamp>.amod.
 func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 	output := ""
 	allowFindings := false
 	allowDirty := false
 	forGit := false
+	includeSessions := false
 	for i := 0; i < len(args); i++ {
 		switch {
 		case args[i] == "--output":
@@ -64,10 +67,24 @@ func runHandoffCreate(args []string, stdout, stderr io.Writer, env Env) int {
 			allowDirty = true
 		case args[i] == "--for-git":
 			forGit = true
+		case args[i] == "--include-sessions":
+			includeSessions = true
 		default:
-			fmt.Fprintf(stderr, "agentmod: handoff create: unsupported argument %q (supported: --output PATH, --allow-findings, --allow-dirty, --for-git)\n", args[i])
+			fmt.Fprintf(stderr, "agentmod: handoff create: unsupported argument %q (supported: --output PATH, --allow-findings, --allow-dirty, --for-git, --include-sessions)\n", args[i])
 			return ExitError
 		}
+	}
+	if includeSessions && !forGit {
+		fmt.Fprintf(stderr, "agentmod: handoff create: --include-sessions is only meaningful with --for-git: a regular .amod snapshot already includes sessions and logs\n")
+		return ExitError
+	}
+	if includeSessions {
+		// FABLE_PLAN §19: sessions in a committed package would publish your
+		// full conversation history with the repository, so they require
+		// encryption — which this version does not implement. This is a
+		// deliberate refusal, not a missing feature toggle.
+		fmt.Fprintf(stderr, "agentmod: handoff create: --for-git --include-sessions is not supported: a git handoff package is committed and published with the repository, so carrying sessions (your full agent conversation history) would require encrypting them, and this version of agentmod does not implement encryption; pack a regular .amod snapshot ('agentmod handoff create') to move sessions privately\n")
+		return ExitError
 	}
 	if forGit && output != "" {
 		fmt.Fprintf(stderr, "agentmod: handoff create: --output cannot be combined with --for-git: the git handoff package always lands at %s/ in the project root so the repository finds it\n", handoff.GitDirName)

@@ -137,7 +137,14 @@ Add/split items freely; keep units small.
        renderers grew honest git-mode wording. NOTE: sessions/logs still
        travel until the next slice — --for-git is NOT yet git-safe for
        sessions; T28 stays 🟡)
-- [ ] sessions/logs excluded; --include-sessions fails w/ encryption explanation (+ tests)
+- [x] sessions/logs excluded; --include-sessions fails w/ encryption explanation (+ tests)
+      (D048: ForGitRules() = DefaultRules + session-data + log-data,
+       path-anchored to the routed homes (targets verified against real
+       agent installs); CreateForGit applies it when Rules is nil;
+       --include-sessions always refuses — without --for-git "regular
+       snapshots already include sessions", with it the §19 encryption
+       explanation — before any FS work; git-mode HANDOFF.md states the
+       exclusion; .amod format provably still packs sessions; T28 ✅)
 - [ ] pack --for-git alias (+ tests)
 - [ ] handoff inspect/verify/restore accept a tree package directory
       (drops the honesty notes D047 put in the git-mode HANDOFF/RESTORE

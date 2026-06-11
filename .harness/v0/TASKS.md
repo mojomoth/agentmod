@@ -89,8 +89,15 @@ Add/split items freely; keep units small.
        checksums stay Verify's job, restore runs Open→Verify→PlanRestore;
        .agentmod whitelist + §21 protected elements + lexical symlink
        containment; restore/unpack stay stubs until extraction lands)
-- [ ] backup existing .agentmod before restore (+ tests)
+- [x] backup existing .agentmod before restore (+ tests)
+      (D042: handoff.BackupAgentmod — atomic rename to
+       .agentmod.backup-<utc-stamp>, rollback = rename back; absent source
+       no-op, occupied name refusal, stray-file backed up too; pipeline
+       pinned Open→Verify→PlanRestore→Backup→extract; extraction slice must
+       gitignore `.agentmod.backup-*/` when a backup was made)
 - [ ] restore writes only under .agentmod/; no script execution (+ tests)
+      (consumes (*Snapshot).PlanRestore (D041) + BackupAgentmod (D042);
+       Dirs→Files→Links order; gitignore the backup pattern per D042)
 - [ ] portability: separators, exec bits, MCP absolute-path warn/rewrite (+ tests)
 - [ ] post-restore doctor + re-login notices; unpack alias (+ tests)
 

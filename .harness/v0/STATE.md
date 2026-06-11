@@ -1,7 +1,7 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 6 slice 1 — restore validation
-layer PlanRestore + malicious fixtures, D041; T24 🟡)
+Last updated: 2026-06-11 (iteration: Phase 6 slice 2 — pre-restore backup
+BackupAgentmod, D042; T25 🟡)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
@@ -15,7 +15,8 @@ layer PlanRestore + malicious fixtures, D041; T24 🟡)
   D037; T19 ✅) + slice 5 (git state metadata + --allow-dirty, D039;
   T22 ✅) + slice 6 (inspect/verify/list + pack alias, D040; T23 ✅).
   Phase 6 IN PROGRESS: slice 1 (restore validation layer PlanRestore,
-  D041; T24 🟡) done; next is the backup slice.
+  D041; T24 🟡) + slice 2 (pre-restore backup BackupAgentmod, D042;
+  T25 🟡) done; next is the extraction slice.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -715,6 +716,24 @@ layer PlanRestore + malicious fixtures, D041; T24 🟡)
     extra symlinks) which rewriteSnapshot's fixed-mode extras cannot;
     `wantNoPlan` asserts nil-plan + named problem. Clean fixture pins
     the exact Dirs/Files/Links sets incl. modes + link target.
+- pre-restore backup LANDED and green (Phase 6 slice 2 ✅, D042, T25 🟡):
+  new `internal/handoff/backup.go` — `BackupAgentmod(projectRoot, now)
+  (string, error)` renames `.agentmod` to `.agentmod.backup-<utc-stamp>`
+  (stamp format = default snapshot stamp, always UTC; `now` injected per
+  D034). Read D034+D040+D041+D042 before touching restore code; pipeline
+  pinned Open → Verify → PlanRestore → BackupAgentmod → extract.
+  - Rename, not copy (D042): atomic, contents never read, rollback =
+    rename back. Absent `.agentmod` → ("", nil) no-op; occupied backup
+    name → refusal, nothing moved; stray regular FILE at `.agentmod`
+    backed up as-is. Exported `BackupPrefix` for the restore cli.
+  - Gitignore decision SETTLED in D042: extraction slice must add
+    `.agentmod.backup-*/` via ensureGitignore (generalized to take an
+    entry) when a backup was actually created — untracked backups trip
+    the D039 dirty gate on the next create. init stays untouched.
+  - 5 test funcs in backup_test.go (tree-intact + rename-back rollback,
+    no-op, collision refusal w/ source+occupant untouched, stray-file,
+    UTC stamp under KST clock). Library-only slice: restore/unpack stubs
+    unchanged, no cli surface change, no binary smoke needed.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -751,25 +770,36 @@ Later same day: `~/.codex` mtime 6월 11 02:28, same verdict. And again
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 6, second item: "backup existing .agentmod before restore (+ tests)".
-Re-read FABLE_PLAN §18 ("Backup of the existing `.agentmod` first"), §25,
-IMPLEMENTATION_PLAN §12 (backup to `.agentmod.backup-<timestamp>`), and
-D034+D040+D041 before coding. Notes:
-- IMPLEMENTATION_PLAN §12 names the backup target
-  `.agentmod.backup-<timestamp>`; timestamp should come from env.Now
-  (D034's injected clock) for testability. Decide rename-vs-copy (rename
-  is atomic and fast; the ORIGINAL must survive any later extraction
-  failure) and record it.
-- This can be a small library/cli slice on its own, or fold into the
-  extraction slice ("restore writes only under .agentmod/") if both stay
-  small — extraction consumes (*Snapshot).PlanRestore() (D041): MkdirAll
-  Dirs, write Files, create Links LAST, never execute anything.
-- The `.agentmod.backup-*` name must NOT be matched by project discovery
-  (it isn't — Discover looks for `.agentmod/agentmod.toml` exactly), and
-  handoff list/init must not trip over it; check .gitignore semantics
-  (D014 covers `.agentmod/` only — a backup dir next to it would show up
-  in git status; decide whether ensureGitignore should also cover
-  `.agentmod.backup-*` or restore should warn).
+Phase 6, third item: "restore writes only under .agentmod/; no script
+execution (+ tests)" — the extraction slice that turns `handoff restore`
+(and the `unpack` alias) from stubs into the real command. Re-read
+FABLE_PLAN §18/§25, IMPLEMENTATION_PLAN §12, and D034+D040+D041+D042
+before coding. Notes:
+- Pipeline is pinned (D042): Open → Verify (refuse on any problem, exit 3)
+  → PlanRestore (same) → BackupAgentmod (refuse on error) → extract the
+  plan: MkdirAll Dirs, write Files (O_CREATE|O_EXCL into the fresh tree),
+  create Links LAST (D041 ordering), `filepath.FromSlash` to join RelPath
+  to the project root. Never execute anything.
+- Restore needs a project? Decide: IMPLEMENTATION_PLAN §12 extracts under
+  the project root — but a restore on a fresh machine happens BEFORE init
+  (RESTORE.md's step order is install → init → restore → doctor, so
+  requiring a project matches the packed docs; check RESTORE.md wording in
+  docs.go before deciding otherwise).
+- On extraction failure: leave the backup in place and name BOTH paths
+  (partial tree + backup) — or roll back automatically (remove partial,
+  rename backup back). Decide and record; rollback = rename back (D042).
+- When a backup was created, extend .gitignore with `.agentmod.backup-*/`
+  via ensureGitignore generalized to take an entry (decision already
+  settled in D042 — implement, don't re-litigate) and print the backup
+  path. Also recreate layout.Subdirs() missing from the payload (snapshots/
+  is structurally excluded so the restored tree lacks it) or doctor will
+  warn right after restore.
+- The snapshot file itself may live INSIDE `.agentmod/snapshots/` of the
+  tree being renamed away — Open holds the zip open (rename keeps the fd
+  valid on POSIX), but verify the path-handling order anyway; safest is to
+  Open+Verify+Plan fully before calling BackupAgentmod.
+- Mind the smoke gotcha (D040): redirect smoke output OUTSIDE the project
+  or the D039 dirty gate trips.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

@@ -1059,3 +1059,45 @@ its own path handling.
   `wantNoPlan`. Hostile symlink TARGETS are made by mutating the fixture
   link's content via rewriteSnapshot with fixChecksums=true (a symlink's
   content IS its target, D034).
+
+## D042 — 2026-06-11 — Pre-restore backup: rename to .agentmod.backup-<utc-stamp> (Phase 6 slice 2)
+
+`BackupAgentmod(projectRoot, now) (string, error)` in new
+`internal/handoff/backup.go` — library-level like D041's validation slice;
+`handoff restore`/`unpack` stay stubs. The restore pipeline is pinned as
+Open → Verify → PlanRestore → BackupAgentmod → extract; the extraction
+slice consumes this function and must not invent its own backup handling.
+
+- **Rename, not copy**: one `os.Rename` — atomic, reads none of the
+  contents (sessions/auth bytes never pass through agentmod), preserves
+  every mode/symlink byte, and the original survives any later extraction
+  failure AS the backup; the complete rollback is renaming the backup
+  back. A copy would double disk for large session dirs and leave a
+  half-copied backup on failure.
+- **Name**: `.agentmod.backup-<utc-stamp>` (IMPLEMENTATION_PLAN §12),
+  stamp format identical to default snapshot names (`20060102-150405`),
+  ALWAYS rendered in UTC regardless of the clock's zone. `now` comes from
+  the caller (cli passes env.Now per D034) — testable, deterministic.
+  Exported `BackupPrefix` so the restore cli names the pattern in output
+  and gitignore handling without re-spelling it.
+- **Edge contract**: absent `.agentmod` → ("", nil) — a fresh-machine
+  restore has nothing to back up and that is not an error. An existing
+  entry at the backup name → refusal naming it, NOTHING moved (D034
+  collision discipline; same-second restores are the only realistic
+  cause). Type-agnostic: a stray regular FILE at `.agentmod` is backed up
+  as-is — losing user data is never acceptable, judging the entry is
+  doctor's job (init errors on it, backup must not).
+- **Discovery/list safety** (verified, not just asserted): Discover
+  matches the `.agentmod/agentmod.toml` path exactly, so
+  `.agentmod.backup-*` can never be discovered as a project root;
+  handoff list reads `.agentmod/snapshots/` only.
+- **Gitignore decision (settled now — extraction slice implements, do not
+  re-litigate)**: D014's entry covers `.agentmod/` only, so a backup dir
+  is untracked → shows in git status AND trips the D039 dirty gate on the
+  next `handoff create`. When (and only when) restore actually created a
+  backup, the restore cli must extend `.gitignore` with
+  `.agentmod.backup-*/` via the ensureGitignore machinery generalized to
+  take an entry, and print the backup path. init stays untouched — no
+  permanent pattern for an artifact that usually never exists. The
+  post-restore-notices slice should also tell the user to delete the
+  backup once the restore is verified.

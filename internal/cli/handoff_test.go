@@ -599,6 +599,10 @@ func TestHandoffRestoreRoundTrip(t *testing.T) {
 		"— all under "+filepath.Join(dst, ".agentmod"),
 		"previous environment backed up to: "+wantBackup,
 		".gitignore: added .agentmod.backup-*/",
+		// The snapshot carried no claude/settings.json, so the portability
+		// pass wires the guard fresh for this machine (D044).
+		"Claude guard: PreToolUse Bash hook written",
+		"portability: no foreign absolute paths in restored agent configs",
 		"agentmod doctor",
 	)
 	// The marker traveled; the old environment is intact in the backup.
@@ -615,6 +619,64 @@ func TestHandoffRestoreRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantContains(t, ".gitignore", string(gi), ".agentmod/\n", ".agentmod.backup-*/\n")
+}
+
+func TestHandoffRestoreRewritesGuardAndWarnsForeignPaths(t *testing.T) {
+	// The portability pass (FABLE_PLAN §18, D044): a snapshot whose
+	// settings.json was wired on the SOURCE machine gets its guard hook
+	// command rewritten to THIS machine's binary, and absolute paths in
+	// other restored configs that do not resolve here are warned about —
+	// without changing the exit code.
+	src := makeProject(t, config.Default())
+	claudeDir := filepath.Join(src, ".agentmod", "claude")
+	codexDir := filepath.Join(src, ".agentmod", "codex")
+	for _, d := range []string{claudeDir, codexDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sourceCmd := guardHookCommand("/fake/source/agentmod")
+	settings, err := marshalSettings(freshGuardSettings(sourceCmd))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), settings, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	codexCfg := "[mcp_servers.docs]\ncommand = \"/missing-on-this-machine/mcp\"\n"
+	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(codexCfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "snap.amod")
+	if code, _, stderr := runHandoffForTest(t, fakeEnv(src, nil), "create", "--output", output); code != ExitOK {
+		t.Fatalf("create failed: %s", stderr)
+	}
+
+	dst := makeProject(t, config.Default())
+	code, stdout, stderr := runHandoffForTest(t, fakeEnv(dst, nil), "restore", output)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr)
+	}
+	wantContains(t, "stdout", stdout,
+		"Claude guard: guard hook binary path updated",
+		"portability: 1 absolute path in restored agent configs needs attention:",
+		".agentmod/codex/config.toml: /missing-on-this-machine/mcp — does not exist on this machine",
+	)
+	// The restored settings.json now points at this machine's binary, not
+	// the source machine's.
+	restored, err := os.ReadFile(filepath.Join(dst, ".agentmod", "claude", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantContains(t, "settings.json", string(restored), wantGuardCommand)
+	if strings.Contains(string(restored), "/fake/source/agentmod") {
+		t.Errorf("restored settings.json still carries the source machine's binary path:\n%s", restored)
+	}
+	// The codex config itself is user-owned and untouched (warn, not rewrite).
+	after, err := os.ReadFile(filepath.Join(dst, ".agentmod", "codex", "config.toml"))
+	if err != nil || string(after) != codexCfg {
+		t.Errorf("codex/config.toml was modified (err = %v):\n%s", err, after)
+	}
 }
 
 func TestHandoffRestoreGitignoreSkippedOutsideGitRepo(t *testing.T) {

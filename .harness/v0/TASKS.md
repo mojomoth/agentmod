@@ -105,8 +105,18 @@ Add/split items freely; keep units small.
        .agentmod.backup-*/ added only when a backup was made; nothing
        from a snapshot is ever executed; unpack stays a stub for the
        notices slice; T24+T25 flip ✅, T26 🟡)
-- [ ] portability: separators, exec bits, MCP absolute-path warn/rewrite (+ tests)
+- [x] portability: separators, exec bits, MCP absolute-path warn/rewrite (+ tests)
+      (D044: separators/exec bits were already structural (D041 refusals,
+       D043 umask-proof chmod) — the slice added the post-restore
+       portability pass: ensureClaudeGuardHook re-wires the guard command
+       to THIS machine's binary (the one rewrite, agentmod owns the file);
+       scanRestoredConfigs walks every string value in
+       claude/settings.json + claude/.claude.json + codex/config.toml +
+       opencode/opencode.json and WARNS on machine-specific absolute paths
+       (never rewrites user-owned files, never changes exit code); T27 ✅)
 - [ ] post-restore doctor + re-login notices; unpack alias (+ tests)
+- [ ] doctor: portability/MCP absolute-path finding (§23 "MCP warnings" +
+      "Portability risks"; reuse scanRestoredConfigs from D044)
 
 ## Phase 7 — git handoff
 - [ ] --for-git → .agentmod-handoff/, git-safe contents (+ tests)

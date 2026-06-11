@@ -1153,3 +1153,63 @@ precedent). Read D034+D040+D041+D042+this before touching restore code.
   in-repo restore then creates `.gitignore` containing only the backup
   pattern. Re-running init fixes it (idempotent, D014's documented
   remedy). The post-restore-notices slice may mention it.
+
+## D044 — 2026-06-11 — Restore portability pass: rewrite only what we own, warn on the rest (Phase 6 slice 4)
+
+`internal/cli/portability.go` (`reportPortability`, `scanRestoredConfigs`,
+`classifyAbsoluteToken`, `collectStrings`, `localAgentmodEquivalent`,
+`isWindowsAbsPath`, `restoredConfigRelPaths`), called by runHandoffRestore
+after the gitignore step, before the closing doctor hint. Implements
+FABLE_PLAN §18 "MCP absolute-path warning or rewriting" + §22 and
+IMPLEMENTATION_PLAN §14's MCP half. Read D029+D041+D043+this before
+touching portability/guard-rewrite code.
+
+- **Separators and exec bits needed NO new code**: D041 settled
+  "normalized" as REFUSED (schema-v1 snapshot paths are forward-slash
+  relative; backslash/drive names are PlanRestore hard refusals),
+  extraction joins via filepath.FromSlash, and recorded modes are
+  chmodded umask-proof (D043). T27's matrix row documents this split.
+- **The one rewrite**: `ensureClaudeGuardHook(agentmodDir, env)` re-runs
+  after every successful restore — the restored claude/settings.json
+  carries the SOURCE machine's binary path in the guard hook command, and
+  the existing writer (D027) repairs exactly that in place (or writes the
+  file fresh when the snapshot had none). agentmod OWNS this file, so the
+  rewrite is safe. A wiring failure (snapshot shipped unparseable JSON)
+  is a stderr WARNING, exit stays 0 — restore succeeded; doctor's D029
+  finding reports the same condition with the writer's own error string.
+- **Everything else is warn-only, deliberately**: IMPLEMENTATION_PLAN §14
+  leaned "rewrite when inside the project", but rewriting means
+  re-marshaling a user-owned JSON/TOML document (key reordering, lost
+  formatting, JSONC breakage) and the source project root is not recorded
+  in the manifest (privacy — D039 records only redacted git facts), so
+  "inside the project" can only be detected via an `.agentmod` path
+  element anyway. The warning for that case names the computed local
+  equivalent (`localAgentmodEquivalent`: tail after the `.agentmod`
+  element joined onto this project's agentmod dir) so the user can do the
+  edit. Warnings NEVER change restore's exit code.
+- **Scan semantics** (§31 honored — no MCP schema assumptions): fixed
+  candidate list claude/settings.json, claude/.claude.json,
+  codex/config.toml, opencode/opencode.json; absent files skipped;
+  unreadable/unparseable files degrade to a file-level "review manually"
+  warning (D024's conservative pattern). Every string VALUE (keys
+  skipped) is whitespace-tokenized, quote-trimmed, then classified:
+  Windows UNC/drive spellings always warn; unix absolute paths are
+  silent when they resolve on THIS machine (they work) or live inside
+  this project's .agentmod and exist; inside-this-.agentmod-but-missing,
+  foreign-.agentmod, and plain nonexistent paths warn with distinct
+  remedies. Relative paths are always silent — they travel correctly by
+  construction. Strings containing the guardHookMarker are exempt (the
+  pass just re-resolved that command; doctor owns its staleness).
+  Warnings are deduplicated and sorted (file, path, detail) for
+  deterministic output. BurntSushi decodes arrays-of-tables as
+  []map[string]any — collectStrings has that extra case stdlib JSON
+  never produces.
+- **Known noise accepted**: a config string that merely LOOKS like an
+  absolute path (e.g. a JSON-pointer "/foo/bar") warns if it doesn't
+  exist locally. Warn-level only; documented trade for not parsing
+  per-tool schemas. pnpm-style `--flag=/abs/path` tokens are NOT split
+  on `=` in MVP — record as a future refinement if it bites.
+- Follow-up task added: doctor portability/MCP finding (§23 "MCP
+  warnings" + "Portability risks") reusing scanRestoredConfigs — restore
+  prints the warnings once; doctor should be able to re-surface them on
+  demand.

@@ -1,7 +1,7 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 6 slice 3 — restore extraction
-(*Snapshot).Restore + `handoff restore` cli, D043; T24 ✅ T25 ✅ T26 🟡)
+Last updated: 2026-06-11 (iteration: Phase 6 slice 4 — restore portability
+pass: guard-hook rewrite + MCP absolute-path warnings, D044; T27 ✅)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
@@ -17,8 +17,9 @@ Last updated: 2026-06-11 (iteration: Phase 6 slice 3 — restore extraction
   Phase 6 IN PROGRESS: slice 1 (restore validation layer PlanRestore,
   D041; T24) + slice 2 (pre-restore backup BackupAgentmod, D042; T25) +
   slice 3 (extraction: Restore + `handoff restore` cli, D043; T24+T25 ✅,
-  T26 🟡) done; remaining: portability slice, then post-restore
-  notices/doctor + unpack alias.
+  T26 🟡) + slice 4 (portability pass: guard rewrite + MCP warnings,
+  D044; T27 ✅) done; remaining: post-restore notices/doctor + unpack
+  alias, then the new doctor-MCP-finding follow-up item.
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -778,6 +779,40 @@ Last updated: 2026-06-11 (iteration: Phase 6 slice 3 — restore extraction
     tree, .gitignore created with pattern, git status clean of backup) →
     doctor "all 6 directories present" → garbage refusal exit 3 no
     backup → unpack stub exit 1.
+- restore portability pass LANDED and green (Phase 6 slice 4 ✅, D044,
+  T27 ✅): new `internal/cli/portability.go` (`reportPortability` +
+  `scanRestoredConfigs`/`classifyAbsoluteToken`/`collectStrings`/
+  `localAgentmodEquivalent`/`isWindowsAbsPath`/`restoredConfigRelPaths`),
+  called by runHandoffRestore after the gitignore step. Read D044 (+D029/
+  D041/D043) before touching portability code.
+  - Separators + exec bits needed NO new code (D041 refusals + FromSlash
+    + D043 umask-proof chmod) — T27's matrix row records the split.
+  - The ONE rewrite: ensureClaudeGuardHook re-runs after every successful
+    restore, repairing the guard hook command from the source machine's
+    binary to this machine's (or writing settings.json fresh when the
+    snapshot had none). Wiring failure = stderr warning, exit stays 0.
+  - Everything else warn-only: known config files (claude/settings.json,
+    claude/.claude.json, codex/config.toml, opencode/opencode.json) are
+    string-walked (no MCP schema assumptions, §31); whitespace-tokenized,
+    quote-trimmed tokens classify as Windows-spelling / foreign-.agentmod
+    (warning names the local equivalent) / inside-this-.agentmod-missing /
+    nonexistent-here; paths that resolve locally and relative paths stay
+    silent; guardHookMarker strings exempt; warnings deduped + sorted;
+    user-owned files NEVER re-marshaled (D044 records why, incl. that the
+    manifest deliberately lacks the source project root).
+  - cli importing BurntSushi/toml directly is new (still the only module
+    dependency, D004 intact); collectStrings needs a []map[string]any
+    case because BurntSushi decodes arrays-of-tables that way.
+  - Tests: 4 funcs in new portability_test.go (classify table ×13,
+    local-equivalent unit, four-file scanner end-to-end w/ exact warning
+    set + dedup + exemption + sorted order + unparseable-file fallback,
+    absent-files-clean) + cli TestHandoffRestoreRewritesGuardAndWarnsForeignPaths
+    (settings.json rewritten before/after, codex/config.toml byte-intact,
+    warn line, exit 0); round-trip test grew the fresh-wire + clean-
+    portability line assertions. Binary smoke in /tmp passed (foreign
+    settings.json rewritten, 2 codex warnings w/ local-equivalent hint,
+    doctor "wired with the current binary"; doctor exit 3 in the smoke
+    subshell is the documented in-project-vars-unset warning, not a bug).
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -814,30 +849,25 @@ Later same day: `~/.codex` mtime 6월 11 02:28, same verdict. And again
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 6, fourth item: "portability: separators, exec bits, MCP
-absolute-path warn/rewrite (+ tests)" — T27. Re-read FABLE_PLAN §18
-("OS path portability handling", "MCP absolute-path warning or
-rewriting") and IMPLEMENTATION_PLAN §12 before coding. Notes:
-- Much of T27 is ALREADY covered: backslash/drive-letter names are
-  hard-refused by PlanRestore (D041 — "normalized" was decided as
-  "refused": schema-v1 snapshot paths are forward-slash relative, full
-  stop), `filepath.FromSlash` joins RelPaths on extraction (D043), and
-  exec bits survive restore umask-proof (D043 round-trip test). The NEW
-  work is the MCP half: find absolute paths in restored MCP/agent config
-  (e.g. `.agentmod/claude/settings.json` hook commands point at the
-  SOURCE machine's agentmod binary — guardHookEntries/inspectGuardHook
-  from claudesettings.go can detect that, D029) and warn or rewrite.
-  Decide warn vs rewrite per file type and record it; rewriting the
-  guard hook command to THIS machine's binary is the obvious safe
-  rewrite (the wiring code already exists in ensureClaudeGuardHook).
-- The remaining slice after that ("post-restore doctor + re-login
-  notices; unpack alias", T26's ✅ flip) should print the re-login
-  remedies (handoff.ClaudeReloginRemedy/CodexReloginRemedy — already
-  exported), run/point at doctor, wire `unpack` as a true alias, and
-  mention deleting the backup once verified (D042/D043 notes).
-- D043's known wrinkle if it comes up: init-before-`git init` projects
-  end up with a .gitignore holding only the backup pattern after an
-  in-repo restore; re-running init fixes it (D014).
+Phase 6, fifth item: "post-restore doctor + re-login notices; unpack
+alias (+ tests)" — flips T26 ✅ and completes Phase 6's TASKS list
+(the new doctor-MCP-finding follow-up item comes after). Notes:
+- Print the re-login remedies after restore
+  (handoff.ClaudeReloginRemedy/CodexReloginRemedy — already exported
+  from internal/handoff, identical strings to RESTORE.md/doctor), plus
+  the macOS Keychain note where env.GOOS == "darwin" (D025 pattern).
+- Run or point at doctor (FABLE_PLAN §18 "Run doctor after restore" —
+  decide run-inline vs print-the-command and record it; runDoctor takes
+  (stdout, stderr, env) so inline is feasible, but mind its exit-3
+  in-project-vars-unset warning firing in fresh shells, see D044 smoke
+  note).
+- Wire `unpack` as a TRUE alias of `handoff restore` (cli.go top-level
+  case currently prints the stub message; mirror the `pack` alias).
+- Mention deleting the backup once verified (D042/D043) and the D043
+  known wrinkle (init-before-`git init` → .gitignore holds only the
+  backup pattern; re-run init).
+- Insertion point: runHandoffRestore between reportPortability and the
+  current closing line (which the notices likely replace/extend).
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

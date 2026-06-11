@@ -238,6 +238,11 @@ func runHandoffRestore(args []string, stdout, stderr io.Writer, env Env) int {
 			fmt.Fprintf(stdout, "  .gitignore: %s\n", line)
 		}
 	}
+	// Portability pass (FABLE_PLAN §18, D044): re-wire the guard hook for
+	// this machine's binary and warn about config paths that still point at
+	// the source machine. Restore already succeeded — nothing here changes
+	// the exit code.
+	reportPortability(stdout, stderr, proj.AgentmodDir, env)
 	fmt.Fprintf(stdout, "Run 'agentmod doctor' to check the restored environment; re-login guidance is in the snapshot's RESTORE.md.\n")
 	return ExitOK
 }

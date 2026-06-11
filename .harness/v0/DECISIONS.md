@@ -1425,3 +1425,40 @@ stub gone). Read D034+D040–D044+this before touching restore output.
     version", alongside the existing limitation list.
 - **Phase 7 is COMPLETE** with this decision recorded; next is Phase 8
   (scenario matrix T30, then docs).
+
+## D050 — 2026-06-11 — §27 scenario matrix slice 1: mock-binary isolation matrix (T30 partial)
+
+- **New `internal/cli/scenario_test.go`, `TestScenarioIsolationMatrix`**:
+  one real shell session per supported shell ({zsh, bash} via the T11
+  `shellCases()` table) drives FABLE_PLAN §27.1–§27.4 end to end:
+  proj00 (plain) → proj01 (`agentmod init --no-shell-hook --yes` +
+  re-enter to activate + `agentmod install gstack`) → proj02 (plain),
+  with sectioned stdout (`===P00===`…) parsed per scenario.
+- **"Mock binaries" settled as resolution-rule mirrors**: fake
+  `claude`/`codex`/`opencode` sh scripts on the child PATH print the home
+  each agent would resolve using the real binaries' rules —
+  `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`, `${CODEX_HOME:-$HOME/.codex}`,
+  `$OPENCODE_CONFIG` (no fallback). The claude mock also lists
+  `<home>/skills`, which is what makes §27's plugin-visibility matrix
+  observable (superpowers only via the global home, gstack only inside
+  proj01, never both anywhere). Mutation-verified: a mock that ignores
+  CLAUDE_CONFIG_DIR fails the test on both shells.
+- **init/install run INSIDE the session** through the fakeAgentmodBin
+  wrapper (not pre-built Go-side): this additionally pins §27.2's
+  "must not silently stall at a login screen" — `--yes` init against a
+  global-auth-less fake HOME prints the `Claude auth:`/`Codex auth:`
+  guidance lines (asserted) and the scripted session completing proves
+  nothing read stdin. `install gstack` clones the
+  makeGstackFixtureRepo fixture via `AGENTMOD_GSTACK_SOURCE` with
+  GIT_CONFIG_GLOBAL/SYSTEM masked (runGitFixture discipline); its
+  "Global skills check: … unchanged" line is asserted against the FAKE
+  home — the runtime pollution check provably ran in-session.
+- **Hygiene assertions**: proj00, proj02 and the fake global
+  `~/.claude` are snapshotTree'd before/after the whole session
+  (byte-identical, §28 no-shims); global skills listing is exactly
+  [superpowers] after; gstack SKILL.md fixture bytes verified
+  project-local; XDG_CONFIG_HOME stays unset inside proj01 (§15.3
+  partial isolation); stderr must be empty.
+- **T30 stays 🟡**: §27.5 (A→B round trip) + §27.6 (git handoff) are the
+  second slice — check overlap with restore_test.go/gitpack_test.go
+  round-trip coverage before writing new code (much already exists).

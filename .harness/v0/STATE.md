@@ -1,14 +1,16 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 7 final — pack --for-git
-alias tests + tree-package reader scoped OUT, D049; Phase 7 COMPLETE)
+Last updated: 2026-06-11 (iteration: Phase 8 slice 1 — §27.1–.4
+isolation-matrix scenario test with mock agent binaries, D050; T30 🟡)
 
 ## Where things stand
+- Phase 8 STARTED: slice 1 (§27.1–§27.4 isolation matrix,
+  TestScenarioIsolationMatrix, D050; T30 🟡) done. Next: §27.5/§27.6
+  scenario slice, then docs (README etc.).
 - Phase 7 COMPLETE: slice 1 (git handoff tree writer, D047) + slice 2
   (sessions/logs excluded via ForGitRules, --include-sessions always
   refuses, D048; T28 ✅) + final item (pack --for-git pinned by tests;
-  tree-package reader decided OUT OF SCOPE, D049). Next: Phase 8
-  (scenario tests, then docs).
+  tree-package reader decided OUT OF SCOPE, D049).
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
   both shell hooks + rc editor + env-hygiene integration tests + the
   first-session diagnosis). Phase 3 COMPLETE (six doctor slices + guard
@@ -955,6 +957,33 @@ alias tests + tree-package reader scoped OUT, D049; Phase 7 COMPLETE)
   - Binary smoke in /tmp passed: init → pack --for-git → tree with all
     six members + payload, log/snapshot exclusions named, exit 0, empty
     snapshots/.
+- §27 scenario matrix slice 1 LANDED and green (Phase 8 slice 1 ✅, D050,
+  T30 🟡): new `internal/cli/scenario_test.go` —
+  `TestScenarioIsolationMatrix` + helpers `mockAgentBins`/
+  `scenarioSection`/`prefixedLines`. ZERO product code changed. Read D050
+  before extending scenario coverage.
+  - One real shell session per shell ({zsh, bash} via shellCases) drives
+    §27.1–§27.4: proj00 plain → proj01 (`agentmod init --no-shell-hook
+    --yes` in-session, cd-out/cd-in to activate, `agentmod install
+    gstack` from the makeGstackFixtureRepo fixture via
+    AGENTMOD_GSTACK_SOURCE) → proj02 plain. Stdout sectioned with
+    `===P00===`/`===ENDP00===` markers per scenario.
+  - Mock claude/codex/opencode sh scripts on the child PATH mirror the
+    real resolution rules (CLAUDE_CONFIG_DIR/CODEX_HOME fall back to
+    $HOME; OPENCODE_CONFIG no fallback); the claude mock lists
+    `<home>/skills` — that listing IS the §27 plugin-visibility matrix
+    (superpowers in P00/P02 only, gstack in P01 only). Mutation check
+    done: a mock ignoring CLAUDE_CONFIG_DIR fails both shells.
+  - Also pinned: init-rc/install-rc both 0; init prints `Claude auth:` +
+    `Codex auth:` guidance instead of stalling (§27.2 note, fake HOME has
+    no global creds); install's "Global skills check: … unchanged" runs
+    against the FAKE home in-session; proj00/proj02/fake-global-claude
+    snapshotTree'd byte-identical before/after; global skills listing
+    exactly [superpowers] after; gstack SKILL.md fixture bytes verified
+    project-local; XDG_CONFIG_HOME unset inside proj01; stderr empty.
+  - Gotcha (cost nothing, but know it): the dev-harness PreToolUse guard
+    blocks `sed -i` command lines that mention `$HOME/.claude` — do
+    test-file mutations with the Edit tool, not shell substitution.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -992,28 +1021,37 @@ all three homes + skills list match baseline. D048 iteration: same —
 all three homes + skills list match baseline; the session-target
 research used read-only `ls` of the global homes, zero writes.
 D049 iteration: same — `~/.codex` mtime still 19:15, all three homes +
-skills list match baseline.)
+skills list match baseline.
+D050 iteration: `~/.codex` mtime drifted to 20:33 — read-only `ls`
+confirms zero agentmod-named entries (the user's own codex runtime
+churn again); `~/.claude`, `~/.config/opencode` and the skills list
+match baseline. The scenario test's fake HOME is a temp dir; the real
+homes were never touched.)
 
 ## Failing tests
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 8, first item: "Scenario tests §27: proj00/proj01/proj02
-isolation matrix (mock binaries)" (T30). Read FABLE_PLAN §27.1–§27.4
-for the scenario definitions. Reuse, do not reinvent: the T11
-integration harness in internal/cli/integration_test.go
-(shellCases/sentinelEnv/envSection/countPathEntries/diffTrees +
-hook_test.go's fakeAgentmodBin/childEnv/lineAfter TestMain dispatch),
-restore_test.go's digestTree/diffDigests/pipelineForRestore, and
-install_test.go's makeGstackFixtureRepo. "Mock binaries" = fake
-claude/codex/opencode executables on the child PATH that print which
-config dir env vars they see — they must NOT be real installs (GOAL
-quality bar). Consider splitting: §27.1–.4 isolation matrix first
-(one slice), then §27.5 A→B round-trip + §27.6 git handoff scenario
-(second slice, much of which existing restore/gitpack tests already
-cover — check overlap before writing new code). Note for the README
-slice (Phase 8 docs): D049 requires the limitations list to mention
-manual tree-package restore.
+Phase 8, second item: "Scenario test: A→B handoff round-trip; git
+handoff" (§27.5 + §27.6, T30's remaining half). FIRST check overlap
+with existing coverage — much already exists: restore_test.go (A→B
+round trip incl. marker-file travel, backup, re-login block, inline
+doctor) and gitpack_test.go (tree creation, exclusions) + cli
+TestPackForGitAlias. The likely GAP for §27.5: an end-to-end
+"machine A → machine B" framing where B is a DIFFERENT fake-HOME/
+project tree restored over the same git checkout, asserting config/
+skills/gstack continue while auth is absent + re-login guidance
+prints — possibly just a thin scenario wrapper over
+pipelineForRestore (restore_test.go) or a cli-level test reusing
+digestTree/diffDigests. §27.6 likely needs only a scenario-named
+assertion that --for-git output under .agentmod-handoff/ excludes
+source/secrets/auth/sessions/logs (gitpack tests cover pieces —
+maybe one consolidated scenario test or a documented mapping in
+TEST_MATRIX). Decide small: if existing tests already prove a
+clause, record the mapping instead of duplicating code. After that:
+README.md (remember D049's manual-tree-restore limitation + D016's
+pnpm/bun-bin note + D018's non-interactive-bash note), then the
+other distribution docs, then the final audit.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

@@ -155,8 +155,17 @@ Add/split items freely; keep units small.
        README limitations (Phase 8) must list manual tree restore)
 
 ## Phase 8 — docs + scenarios
-- [ ] Scenario tests §27: proj00/proj01/proj02 isolation matrix (mock binaries)
-- [ ] Scenario test: A→B handoff round-trip; git handoff
+- [x] Scenario tests §27: proj00/proj01/proj02 isolation matrix (mock binaries)
+      (D050: TestScenarioIsolationMatrix in scenario_test.go — one real
+       {zsh,bash} session each runs init + install gstack through the
+       fakeAgentmodBin wrapper across three folders; mock
+       claude/codex/opencode on the child PATH mirror the real resolution
+       rules and list visible skills; superpowers/gstack visibility matrix,
+       non-stalling init auth guidance, in-session global-pollution check,
+       before/after tree snapshots, XDG untouched; mutation-verified;
+       T30 stays 🟡 until the §27.5/.6 slice below)
+- [ ] Scenario test: A→B handoff round-trip; git handoff (§27.5/§27.6 —
+      check overlap with restore_test.go/gitpack_test.go first, D050)
 - [ ] README.md (what it is/is not, quick start, limitations, FAQ)
 - [ ] LICENSE, SECURITY.md, CONTRIBUTING.md, CHANGELOG.md, CODE_OF_CONDUCT.md
 - [ ] Final §28/§29 audit + final report + DONE.md

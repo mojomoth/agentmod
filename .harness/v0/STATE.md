@@ -1,14 +1,13 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 8 slice 2 — §27.5 A→B
-round-trip + §27.6 git-handoff scenario tests, D051; T30 ✅)
+Last updated: 2026-06-11 (iteration: Phase 8 slice 3 — README.md)
 
 ## Where things stand
 - Phase 8 IN PROGRESS: slice 1 (§27.1–§27.4 isolation matrix,
   TestScenarioIsolationMatrix, D050) + slice 2 (§27.5/§27.6 cli-level
-  scenario tests, D051; T30 ✅) done. Scenario coverage COMPLETE.
-  Next: README.md, then the other distribution docs, then the final
-  audit.
+  scenario tests, D051; T30 ✅) + slice 3 (README.md) done.
+  Next: LICENSE/SECURITY/CONTRIBUTING/CHANGELOG/CODE_OF_CONDUCT (one
+  slice), then the final §28/§29 audit + DONE.md.
 - Phase 7 COMPLETE: slice 1 (git handoff tree writer, D047) + slice 2
   (sessions/logs excluded via ForGitRules, --include-sessions always
   refuses, D048; T28 ✅) + final item (pack --for-git pinned by tests;
@@ -1010,6 +1009,38 @@ round-trip + §27.6 git-handoff scenario tests, D051; T30 ✅)
     manifest for_git, and the payload file set EXACTLY
     {agentmod.toml, claude/CLAUDE.md, codex/config.toml} — the
     DeepEqual means a leak from ANY category fails the test.
+- README.md LANDED (Phase 8 slice 3 ✅): repo-root README covering every
+  FABLE_PLAN §30 bullet. ZERO product code changed; no new tests (docs
+  slice; `go test ./...` re-run green anyway).
+  - Sections: what it is (two roles + "git moves source; agentmod moves
+    the agent env") / the five §30 is-NOT bullets / how routing works
+    (var table generated from routing.Vars incl. XDG opt-in + single
+    node/bin PATH entry + bookkeeping vars) / install (build from
+    source) / quick start (init → new-shell caveat → status → install
+    gstack → pack → unpack on machine B) / init details + flags / plain
+    claude-codex-opencode usage + auth bootstrap ladder / gstack
+    (incl. global-listing verification + D010-style doctor warning
+    explained) / handoff members + inspect/verify-anywhere / secrets
+    exclusion policy (rules + scan, REDACTION.md review advice, 0600) /
+    git handoff (sessions/logs excluded, --include-sessions refusal
+    wording) / restore cautions (validate→backup→rollback, never
+    executes, guard re-wire, inline doctor) / doctor / guard
+    (honest "heuristic, not a sandbox") / known limitations / FAQ.
+  - Limitations section carries the four §28-MANDATORY bullets (macOS
+    Keychain §15.1, OpenCode partial isolation §15.3, project .claude/
+    native behavior §3.1, first-session hook D020) PLUS the recorded
+    honest notes: D018 bash hook inert non-interactively (with the
+    `agentmod env` script escape hatch), D016 pnpm/bun bins not on
+    PATH, D049 tree packages restore manually, D035 gstack-.git +
+    node/bin-dangling post-restore repairs, zsh/bash-only shells.
+  - Accuracy was verified against the binary, not memory: usage text
+    captured via `go run . help`; config keys from internal/config;
+    routing table from routing.Vars; guard's protected-home list from
+    internal/guard (all FOUR homes incl. ~/.local/share/opencode);
+    default snapshot stamp checked in cli/handoff.go (20060102-150405 —
+    fixed one wrong example in quick start). LICENSE deliberately NOT
+    referenced anywhere yet — it lands next slice; README must not
+    claim files that don't exist.
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -1053,26 +1084,30 @@ confirms zero agentmod-named entries (the user's own codex runtime
 churn again); `~/.claude`, `~/.config/opencode` and the skills list
 match baseline. The scenario test's fake HOME is a temp dir; the real
 homes were never touched. D051 iteration: `~/.codex` mtime still the
-20:33 reading; all three homes + skills list match baseline.)
+20:33 reading; all three homes + skills list match baseline.
+README iteration: same — `~/.codex` mtime still 20:33, all three homes
++ skills list match baseline; docs-only iteration, zero global reads
+beyond the audit `ls`.)
 
 ## Failing tests
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 8, third item: README.md. §28 makes four limitation bullets
-MANDATORY: macOS Keychain non-isolation (§15.1/D025), OpenCode
-partial isolation (§15.3/D024), project `.claude/` native behavior,
-shell-hook first-session limitation (D020). Also include the
-recorded honest-limitation notes: D049 tree packages restore
-manually (no directory reader), D016 pnpm/bun global bins not on
-PATH, D018 hook inert in non-interactive bash scripts, D034/D040
-snapshot 0600 + verify-anywhere, D010-style global gstack warning
-behavior. Structure per GOAL: what it is / is not (Agent Home Router
-+ Handoff Tool; "git moves source; agentmod moves the agent env"),
-quick start (init → hook → install gstack → pack/restore),
-limitations, FAQ. After README: LICENSE/SECURITY/CONTRIBUTING/
-CHANGELOG/CODE_OF_CONDUCT (one slice), then the final §28/§29 audit
-+ DONE.md.
+Phase 8, fourth item: LICENSE, SECURITY.md, CONTRIBUTING.md,
+CHANGELOG.md, CODE_OF_CONDUCT.md in ONE slice (FABLE_PLAN §30 names
+all five; GOAL §29 requires them to exist). Choices to settle and
+record in DECISIONS.md: license (MIT is the conventional default for
+a Go CLI like this — nothing in FABLE_PLAN/GOAL mandates one, so pick
+and record); SECURITY.md should describe the threat model honestly
+(guard = heuristic, snapshots = untrusted input on restore, secret
+scan = heuristic, report channel); CHANGELOG.md starts at the current
+0.1.0-dev with a summary of the MVP feature set; CONTRIBUTING.md
+points at go test ./... + gofmt + the no-global-pollution test rules
+(fake homes via injected Env, never real HOME); CODE_OF_CONDUCT.md =
+Contributor Covenant. After the LICENSE file lands, ADD a license
+section/badge line to README.md (deliberately omitted now so README
+never references a nonexistent file). Then: final §28/§29 audit +
+final report + DONE.md (CHECKS.md §6 gate; loop.sh re-verifies).
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

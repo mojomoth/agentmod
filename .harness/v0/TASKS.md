@@ -172,6 +172,13 @@ Add/split items freely; keep units small.
        exclusion categories in one --for-git run, payload file set
        pinned by DeepEqual; cli-level, no shell session; mechanics
        overlap mapped to existing tests instead of duplicated; T30 ✅)
-- [ ] README.md (what it is/is not, quick start, limitations, FAQ)
+- [x] README.md (what it is/is not, quick start, limitations, FAQ)
+      (covers every §30 bullet: two roles + "git moves source; agentmod
+       moves the agent env", the five is-NOT bullets, routing table from
+       routing.Vars, init/auth/gstack/handoff/git-handoff/restore/doctor/
+       guard sections, secrets exclusion policy, restore cautions, the four
+       §28-mandatory limitations PLUS D016/D018/D049/D034-D040/D035
+       honest notes, FAQ; command syntax + stamp format verified against
+       the real binary — no product code change)
 - [ ] LICENSE, SECURITY.md, CONTRIBUTING.md, CHANGELOG.md, CODE_OF_CONDUCT.md
 - [ ] Final §28/§29 audit + final report + DONE.md

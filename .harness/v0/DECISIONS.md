@@ -1260,3 +1260,37 @@ stub gone). Read D034+D040–D044+this before touching restore output.
   TestUnpackNotImplemented) + TestHandoffRestoreDarwinKeychainNotice +
   TestHandoffRestoreGitignoreCoverageNote (bare .git dir fixture, file
   content pinned to exactly the backup pattern).
+
+## D046 — 2026-06-11 — Doctor "Agent config paths" finding (Phase 6 final item)
+
+- **Doctor re-surfaces the D044 portability scan on demand** (§23 "MCP
+  warnings" + "Portability risks"): restore prints the warnings exactly
+  once; `agentConfigPathFindings(agentmodDir)` in doctor.go calls
+  `scanRestoredConfigs` verbatim (read-only, already sorted + deduped) so
+  the same audit reruns whenever the user edits a config, copies one in
+  by hand, or moves the project to another machine.
+- **Always-a-line, not skip-when-no-config-files** (the gating question
+  left open in STATE.md): a healthy init'd project always carries ≥2 of
+  the four scanned files (guard-wired claude/settings.json + the
+  opencode.json stub), so the would-be skip case only occurs in degraded
+  trees where Layout/OpenCode-config findings already fire — and an
+  unconditional line documents that the check ran. Zero warnings → one
+  ok line ("no machine-specific absolute paths in agent configs");
+  otherwise ONE WARN FINDING PER WARNING (doctor's problem count ==
+  number of paths to fix), detail = `file: path — detail` or
+  `file: detail` for file-level (unreadable/unparseable) warnings.
+  Inside-project only (the scan targets are .agentmod-relative).
+- **Not gated on per-agent enabled flags** (D027 pattern): the files are
+  consulted the moment an agent runs, enabled or not. Guard-command
+  staleness stays guardFinding's job (the guardHookMarker exemption in
+  classifyAbsoluteToken keeps the two families disjoint — verified, the
+  fakeBinPath command in mkLayout stays clean as predicted in STATE.md).
+- **No rewrite from doctor**: doctor stays strictly read-only (D021);
+  the one rewrite agentmod owns (guard hook re-wire) remains restore's
+  job (D044).
+- Tests: TestDoctorAgentConfigPathsWarn (foreign-.agentmod + missing
+  abs path in codex/config.toml → exit 3, two warn lines in sorted
+  order, local-equivalent hint) + TestDoctorAgentConfigPathsUnparseable
+  (invalid-JSON opencode stub → file-level warn while "OpenCode config"
+  stays ok — stat vs content split) + agentConfigPathLines helper;
+  AllHealthy asserts the ok line, fresh-machine asserts no line.

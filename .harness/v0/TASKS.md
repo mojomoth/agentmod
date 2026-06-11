@@ -121,8 +121,11 @@ Add/split items freely; keep units small.
        canonical D037 remedy strings + darwin-only Keychain line via
        env.GOOS; D043's gitignore-coverage wrinkle noted in output when it
        happens; unpack = true alias of handoff restore; T26 flips ✅)
-- [ ] doctor: portability/MCP absolute-path finding (§23 "MCP warnings" +
+- [x] doctor: portability/MCP absolute-path finding (§23 "MCP warnings" +
       "Portability risks"; reuse scanRestoredConfigs from D044)
+      (D046: agentConfigPathFindings — inside-project, always-a-line
+       (ok when clean), one warn finding per scanRestoredConfigs warning,
+       not gated on enabled flags, doctor stays read-only; Phase 6 done)
 
 ## Phase 7 — git handoff
 - [ ] --for-git → .agentmod-handoff/, git-safe contents (+ tests)

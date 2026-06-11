@@ -1,7 +1,7 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 6 slice 5 — post-restore
-notices: inline doctor + re-login block + unpack alias, D045; T26 ✅)
+Last updated: 2026-06-11 (iteration: Phase 6 final item — doctor
+"Agent config paths" portability/MCP finding, D046; Phase 6 COMPLETE)
 
 ## Where things stand
 - Phase 0 (harness) COMPLETE. Phase 1 COMPLETE. Phase 2 COMPLETE (init +
@@ -14,13 +14,13 @@ notices: inline doctor + re-login block + unpack alias, D045; T26 ✅)
   scan + REDACTION.md, T21 ✅) + slice 4 (HANDOFF.md + RESTORE.md docs,
   D037; T19 ✅) + slice 5 (git state metadata + --allow-dirty, D039;
   T22 ✅) + slice 6 (inspect/verify/list + pack alias, D040; T23 ✅).
-  Phase 6 IN PROGRESS: slice 1 (restore validation layer PlanRestore,
+  Phase 6 COMPLETE: slice 1 (restore validation layer PlanRestore,
   D041; T24) + slice 2 (pre-restore backup BackupAgentmod, D042; T25) +
   slice 3 (extraction: Restore + `handoff restore` cli, D043; T24+T25 ✅,
   T26 🟡) + slice 4 (portability pass: guard rewrite + MCP warnings,
   D044; T27 ✅) + slice 5 (post-restore notices: inline doctor +
-  re-login block + unpack alias, D045; T26 ✅) done; remaining: the
-  doctor-MCP-finding follow-up item, which completes Phase 6.
+  re-login block + unpack alias, D045; T26 ✅) + final item (doctor
+  "Agent config paths" finding, D046). Next: Phase 7 (git handoff).
 - Go skeleton LANDED and green: `go.mod` (module
   `github.com/agentmod/agentmod`, go 1.26), thin `main.go`, `internal/cli`
   dispatcher with `--version`/`version`/`help`/unknown-command handling,
@@ -841,6 +841,27 @@ notices: inline doctor + re-login block + unpack alias, D045; T26 ✅)
     smoke in /tmp passed: A→B unpack printed the full block, real-darwin
     Keychain line, inline doctor with the documented dev-machine warns
     (D010 global gstack, OpenCode globals, hook-inactive), EXIT=0.
+- doctor "Agent config paths" finding LANDED and green (Phase 6 final
+  item ✅, D046): `agentConfigPathFindings(agentmodDir)` in doctor.go,
+  wired after gstackProjectFinding, inside-project only. Read D046
+  (+D021/D044) before touching it.
+  - Reuses `scanRestoredConfigs` verbatim (read-only) — restore prints
+    the warnings once, doctor re-surfaces them on demand (§23 "MCP
+    warnings" + "Portability risks").
+  - Gating settled (D046): always-a-line, not skip-when-no-config-files
+    (healthy projects always carry ≥2 scanned files). Zero warnings →
+    ok line; otherwise one warn finding PER warning (problem count ==
+    paths to fix). Not gated on enabled flags (D027 pattern). The
+    fakeBinPath guard command in mkLayout stays clean via the
+    guardHookMarker exemption — verified, as STATE.md predicted.
+  - Tests: TestDoctorAgentConfigPathsWarn (codex/config.toml foreign +
+    missing paths → exit 3, two sorted warn lines, local-equivalent
+    hint) + TestDoctorAgentConfigPathsUnparseable (invalid-JSON
+    opencode stub → file-level warn; "OpenCode config" stays ok — it
+    stats, never parses) + agentConfigPathLines helper; AllHealthy
+    grew the ok-line assertion, fresh-machine grew wantNoFinding.
+    Binary smoke in /tmp passed (warn ×2 w/ local-equivalent path,
+    ok line after removing the fixture).
 - `.gitignore` (repo's own): added `.harness/v0/reports/*/*.log` — loop.sh
   logs moved into per-run subdirs (e.g. reports/run1-ratelimited/) were
   not matched by the original one-level pattern and polluted git status.
@@ -871,31 +892,29 @@ mtime equality. `~/.claude` and `~/.config/opencode` unchanged from baseline.
 (2026-06-11: same pattern again — `~/.codex` mtime now 6월 11 01:11, the
 other two homes and the skills list unchanged; no agentmod artifacts.
 Later same day: `~/.codex` mtime 6월 11 02:28, same verdict. And again
-16:44, then 19:15 — skills list + other two homes still match baseline.)
+16:44, then 19:15 — skills list + other two homes still match baseline.
+D046 iteration re-verified: all three homes + skills list unchanged from
+the 19:15 reading.)
 
 ## Failing tests
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 6, final item: "doctor: portability/MCP absolute-path finding
-(§23 'MCP warnings' + 'Portability risks')" — the D044 follow-up that
-completes Phase 6. Notes:
-- Reuse `scanRestoredConfigs(agentmodDir)` from
-  internal/cli/portability.go verbatim (it is read-only and already
-  returns sorted, deduplicated `portabilityWarning{File, Path, Detail}`
-  values) — doctor should re-surface on demand what restore printed
-  once (D044 records this intent).
-- Add a finding family (e.g. label "Agent config paths") inside-project
-  only, following the D021 finding pattern: zero warnings → ok line;
-  each warning → warn-level finding (exit 3 via the existing contract).
-  Decide gating: probably skip-when-no-config-files (D024 skip-when-moot
-  pattern) vs always-ok — record in DECISIONS.md.
-- Mind TestDoctorAllHealthy: mkLayout writes a guard-wired settings.json
-  whose command contains fakeBinPath `/fake/bin/agentmod` — that string
-  is guardHookMarker-exempt in classifyAbsoluteToken, so it should stay
-  clean; verify rather than assume.
-- After this, Phase 7 (git handoff: --for-git → .agentmod-handoff/)
-  begins — read FABLE_PLAN §19 + IMPLEMENTATION_PLAN before slicing.
+Phase 7, slice 1: "--for-git → .agentmod-handoff/, git-safe contents"
+(T28). Read FABLE_PLAN §19 + the IMPLEMENTATION_PLAN git-handoff section
+BEFORE slicing — decide there how much lands in slice 1 vs the
+sessions/logs-exclusion and `pack --for-git` items. Notes:
+- Build on the existing create pipeline (internal/handoff Create +
+  exclusion Rules, D034/D035): a git handoff is a differently-targeted,
+  more-excluded snapshot, not a new format — confirm against §19 before
+  assuming.
+- `.agentmod-handoff/` needs a .gitignore DECISION (it must be
+  COMMITTABLE — that is the point) and likely an ensureGitignore
+  NON-entry; check what §19 says about where it sits relative to the
+  project root.
+- `--include-sessions` without encryption must FAIL with the §19
+  explanation (T28 row) — that refusal can land in slice 1 or 2;
+  record the split in TASKS.md when slicing.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

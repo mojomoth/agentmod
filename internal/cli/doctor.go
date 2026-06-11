@@ -86,6 +86,7 @@ func runDoctor(args []string, stdout, stderr io.Writer, env Env) int {
 		findings = append(findings, opencodeIsolationFindings(cfg, cfgOK, env)...)
 		findings = append(findings, shimFinding(proj.AgentmodDir))
 		findings = append(findings, gstackProjectFinding(proj.AgentmodDir))
+		findings = append(findings, agentConfigPathFindings(proj.AgentmodDir)...)
 	}
 	findings = append(findings, agentBinariesFinding(env))
 	findings = append(findings, gstackGlobalFinding(env))
@@ -466,6 +467,31 @@ func gstackProjectFinding(agentmodDir string) finding {
 		return finding{diagWarn, "gstack (project)", path + " exists but is not a directory — move it aside, then run 'agentmod install gstack'"}
 	}
 	return finding{diagOK, "gstack (project)", "not installed ('agentmod install gstack' installs it project-locally)"}
+}
+
+// agentConfigPathFindings re-surfaces the D044 portability scan on demand
+// (§23 "MCP warnings" + "Portability risks"): restore prints these warnings
+// once, doctor repeats them whenever asked, so configs edited after a
+// restore — or copied in by hand — get the same audit. Read-only:
+// scanRestoredConfigs never writes (the guard-command rewrite is restore's
+// job, D044; doctor's own guardFinding covers staleness). Not gated on
+// per-agent enabled flags (D027 pattern): the files are consulted the
+// moment an agent runs, enabled or not. One warn finding per warning so
+// the count in doctor's summary matches the number of paths to fix.
+func agentConfigPathFindings(agentmodDir string) []finding {
+	warns := scanRestoredConfigs(agentmodDir)
+	if len(warns) == 0 {
+		return []finding{{diagOK, "Agent config paths", "no machine-specific absolute paths in agent configs"}}
+	}
+	fs := make([]finding, 0, len(warns))
+	for _, w := range warns {
+		detail := w.File + ": " + w.Detail
+		if w.Path != "" {
+			detail = fmt.Sprintf("%s: %s — %s", w.File, w.Path, w.Detail)
+		}
+		fs = append(fs, finding{diagWarn, "Agent config paths", detail})
+	}
+	return fs
 }
 
 // agentBinariesFinding reports which agent CLIs are reachable (§23 "Claude /

@@ -124,6 +124,7 @@ func TestDoctorAllHealthy(t *testing.T) {
 	wantLevel(t, findingLine(t, stdout, "Agent binaries"), diagOK)
 	wantLevel(t, findingLine(t, stdout, "gstack (global)"), diagOK)
 	wantLevel(t, findingLine(t, stdout, "gstack (project)"), diagOK)
+	wantLevel(t, findingLine(t, stdout, "Agent config paths"), diagOK)
 	wantContains(t, "Project line", findingLine(t, stdout, "Project"), root, filepath.Join(root, ".agentmod"))
 	wantContains(t, "Routing line", findingLine(t, stdout, "Routing env"), "applied for this project")
 	wantContains(t, "PATH line", findingLine(t, stdout, "PATH"), "on PATH once")
@@ -149,6 +150,8 @@ func TestDoctorOutsideProjectFreshMachineIsClean(t *testing.T) {
 	wantLevel(t, findingLine(t, stdout, "HOME"), diagOK)
 	// The guard lives in a project's routed Claude home — no project, no line.
 	wantNoFinding(t, stdout, "Claude guard")
+	// Same for the restored-config portability scan.
+	wantNoFinding(t, stdout, "Agent config paths")
 	// Binary presence is reported out here too (§23), informationally.
 	binaries := findingLine(t, stdout, "Agent binaries")
 	wantLevel(t, binaries, diagOK)
@@ -1153,6 +1156,68 @@ func TestDoctorGuardUnresolvableBinary(t *testing.T) {
 				"hook present", "cannot be resolved", "binary path not verified")
 		})
 	}
+}
+
+// agentConfigPathLines collects every "Agent config paths" finding line —
+// findingLine returns only the first, and this family emits one per warning.
+func agentConfigPathLines(stdout string) []string {
+	var lines []string
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.Contains(line, "  Agent config paths: ") {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func TestDoctorAgentConfigPathsWarn(t *testing.T) {
+	// §23 "MCP warnings" + "Portability risks": doctor re-surfaces the D044
+	// scan, one warn finding per machine-specific absolute path.
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	agentmodDir := filepath.Join(root, ".agentmod")
+	toml := "[mcp_servers.docs]\ncommand = \"/missing/codex-mcp\"\nargs = [\"--root\", \"/Users/alice/p/.agentmod/node\"]\n"
+	if err := os.WriteFile(filepath.Join(agentmodDir, "codex", "config.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	lines := agentConfigPathLines(stdout)
+	if len(lines) != 2 {
+		t.Fatalf("got %d Agent config paths lines, want 2:\n%s", len(lines), stdout)
+	}
+	for _, line := range lines {
+		wantLevel(t, line, diagWarn)
+	}
+	// scanRestoredConfigs sorts by file then path: /Users/... before /missing.
+	wantContains(t, "foreign line", lines[0],
+		".agentmod/codex/config.toml", "/Users/alice/p/.agentmod/node",
+		"another machine's .agentmod", filepath.Join(agentmodDir, "node"))
+	wantContains(t, "missing line", lines[1],
+		".agentmod/codex/config.toml", "/missing/codex-mcp", "does not exist on this machine")
+}
+
+func TestDoctorAgentConfigPathsUnparseable(t *testing.T) {
+	// An unscannable config is a file-level warning (no path column). The
+	// opencode stub stays a present regular file, so the "OpenCode config"
+	// finding must remain ok — only the portability family flags content.
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	stub := layout.OpencodeConfigPath(filepath.Join(root, ".agentmod"))
+	if err := os.WriteFile(stub, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "Agent config paths")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "Agent config paths line", line,
+		".agentmod/opencode/opencode.json", "could not be parsed", "review absolute paths in it manually")
+	wantLevel(t, findingLine(t, stdout, "OpenCode config"), diagOK)
 }
 
 func TestDoctorRejectsArgs(t *testing.T) {

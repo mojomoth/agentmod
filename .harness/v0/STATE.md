@@ -1,19 +1,29 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-12 (iteration: doctor's last three §23 must-warn
-rows, D053 — T29 ✅)
+Last updated: 2026-06-12 (iteration: final §28/§29 audit + final report —
+STATUS: DONE set in DONE.md)
 
 ## Where things stand
-- Phase 8 IN PROGRESS: slice 1 (§27.1–§27.4 isolation matrix,
+- COMPLETE. The final audit iteration ran CHECKS.md §1–§5 (build/vet/fmt
+  clean; fresh `go test ./... -count=1` green across all packages; global
+  homes match baseline — `~/.codex` mtime 12:04 is the documented user
+  codex-runtime churn, zero agentmod artifacts; harness + repo hygiene
+  clean; the untracked `agentmod.textClipping` at repo root is a
+  pre-existing user file, deliberately left alone), then walked FABLE_PLAN
+  §28 line by line (every prohibition false) and §29 line by line (every
+  condition true — verified against the real binary's `help` surface, the
+  all-✅ TEST_MATRIX, the README limitation bullets at lines 276–298, and
+  the existence of all six §30 docs + IMPLEMENTATION_PLAN). Final report
+  written into DONE.md; `STATUS: DONE` set. loop.sh re-verifies
+  independently. 331 test functions total.
+- Phase 8 COMPLETE: slice 1 (§27.1–§27.4 isolation matrix,
   TestScenarioIsolationMatrix, D050) + slice 2 (§27.5/§27.6 cli-level
   scenario tests, D051; T30 ✅) + slice 3 (README.md) + slice 4
   (LICENSE/SECURITY/CONTRIBUTING/CHANGELOG/CODE_OF_CONDUCT — committed by
   the supervising session after content-filter blocks, D052) + slice 5
-  (doctor's last three §23 must-warn rows, D053; T29 ✅ — the final audit
-  found T29 still 🟡 and finished it BEFORE declaring anything) done.
-  ONLY ONE TASK REMAINS: the final §28/§29 audit + final report + DONE.md.
-  The TEST_MATRIX is now ALL ✅ — no known gap stands between this state
-  and the audit.
+  (doctor's last three §23 must-warn rows, D053; T29 ✅) + slice 6 (the
+  final §28/§29 audit + final report, this iteration) done. The
+  TEST_MATRIX is ALL ✅; TASKS.md is all ticked.
 - doctor §23 completion (D053, read it before touching doctor/snapshot
   audit code): "Snapshots" re-surfaces each snapshot's REDACTION.md scan
   counts via handoff.RedactionFindingCounts (never re-scans payload,
@@ -1116,28 +1126,19 @@ D053 iteration (2026-06-12): `~/.codex` mtime drifted to 12:04 — read-only
 again); `~/.claude`, `~/.config/opencode` and the skills list match
 baseline. The /tmp binary smoke used only /tmp trees and never set HOME —
 the dev-harness guard correctly blocked the one attempted `export HOME=`
-smoke line, which was rewritten to run against the real (read-only) HOME.)
+smoke line, which was rewritten to run against the real (read-only) HOME.
+Final-audit iteration (2026-06-12): `~/.codex` mtime still the 12:04
+reading; all three homes + skills list match baseline; audit was
+read-only `ls` plus repo-local work.)
 
 ## Failing tests
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-The final §28/§29 audit + final report + DONE.md (CHECKS.md §6 gate;
-loop.sh re-verifies `go test ./...` independently). This iteration
-already walked the matrix far enough to find and fix the one real gap
-(T29, D053); the audit iteration should now: (1) run all CHECKS.md
-sections; (2) walk FABLE_PLAN §28 line by line — every prohibition must
-be false (note README already carries the four mandatory limitation
-bullets; STATE/DONE/TEST_MATRIX are updated each iteration); (3) walk
-§29 line by line — every condition should now be checkable TRUE against
-code/tests/docs that exist (TEST_MATRIX all ✅); (4) write the final
-report into DONE.md (what was built, test summary, scenario results,
-known limitations, pointers to README/IMPLEMENTATION_PLAN) and set
-`STATUS: DONE`. Keep the report prose technical and original (D052:
-content-filter risk — never paste the Contributor Covenant or large
-policy boilerplate). README's doctor section was already extended with
-the three new D053 findings in the same iteration, so no doc drift is
-pending.
+None — the project is COMPLETE. DONE.md carries the final report and
+`STATUS: DONE`; loop.sh independently re-verifies `go test ./...` and
+stops. If a future iteration ever runs anyway: there is no unchecked
+TASKS.md item; only act if a CHECKS.md check has regressed.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

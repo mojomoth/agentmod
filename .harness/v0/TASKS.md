@@ -194,4 +194,10 @@ Add/split items freely; keep units small.
        handoff.GitPublishRules, gitStateFinding compares the repo HEAD to
        the newest snapshot's recorded HEAD (the one doctor check that
        executes git, read-only); T29 flips ✅)
-- [ ] Final §28/§29 audit + final report + DONE.md
+- [x] Final §28/§29 audit + final report + DONE.md
+      (2026-06-12: CHECKS.md §1–§5 all clean; fresh `go test ./... -count=1`
+       green across all packages; §28 walked line by line — every
+       prohibition false; §29 walked line by line — every condition true,
+       verified against the real binary's help surface, the all-✅
+       TEST_MATRIX, and the README's four mandatory limitation bullets;
+       final report written into DONE.md, STATUS: DONE set)

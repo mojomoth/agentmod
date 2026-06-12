@@ -162,6 +162,16 @@ func ForGitRules() []Rule {
 	return append(DefaultRules(), sessionDataRule(), logDataRule())
 }
 
+// GitPublishRules returns only the session/log rules that ForGitRules adds
+// on top of DefaultRules. doctor applies them to an existing
+// .agentmod-handoff/ payload to detect session or log material a commit
+// would publish (FABLE_PLAN §23) — agentmod's own CreateForGit can never
+// pack such entries, so a hit means the tree was edited by hand or written
+// by another tool.
+func GitPublishRules() []Rule {
+	return []Rule{sessionDataRule(), logDataRule()}
+}
+
 // sessionDataRule matches the session/history locations each agent
 // actually uses inside its routed home (verified against real installs:
 // claude 2.x, codex-cli 0.13x, opencode 1.4 — D048). Path-anchored so a

@@ -185,4 +185,13 @@ Add/split items freely; keep units small.
        by the content filter before committing — see D052; CODE_OF_CONDUCT.md
        was written as an original short policy, NOT the verbatim Contributor
        Covenant, and the slice was committed by the supervising session)
+- [x] doctor: last three §23 must-warn rows — snapshot secret candidates,
+      git-handoff session/log leak, restore-target HEAD drift (+ tests)
+      (D053: found 🟡 by the final audit — earlier slices mapped these to
+       "Phases 7–8" and none picked them up; snapshotFindings parses each
+       snapshot's REDACTION.md via handoff.RedactionFindingCounts,
+       gitHandoffFinding audits .agentmod-handoff/payload with the new
+       handoff.GitPublishRules, gitStateFinding compares the repo HEAD to
+       the newest snapshot's recorded HEAD (the one doctor check that
+       executes git, read-only); T29 flips ✅)
 - [ ] Final §28/§29 audit + final report + DONE.md

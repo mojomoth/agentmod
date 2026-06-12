@@ -254,7 +254,9 @@ project/config/layout state, shell-hook installation and liveness, routing
 drift, lingering variables outside projects, duplicate PATH entries,
 HOME/shim violations, per-agent auth presence with re-login instructions,
 OpenCode leak warnings, gstack global/project state, Claude guard wiring,
-and portability risks in restored configs.
+portability risks in restored configs, secret candidates recorded in
+existing snapshots, session/log material inside `.agentmod-handoff/`, and
+whether the repository's HEAD still matches the newest snapshot's.
 
 ## The Claude Bash guard
 

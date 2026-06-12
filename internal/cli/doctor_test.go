@@ -125,6 +125,12 @@ func TestDoctorAllHealthy(t *testing.T) {
 	wantLevel(t, findingLine(t, stdout, "gstack (global)"), diagOK)
 	wantLevel(t, findingLine(t, stdout, "gstack (project)"), diagOK)
 	wantLevel(t, findingLine(t, stdout, "Agent config paths"), diagOK)
+	wantLevel(t, findingLine(t, stdout, "Snapshots"), diagOK)
+	wantLevel(t, findingLine(t, stdout, "Git handoff"), diagOK)
+	// No snapshots yet, so there is no recorded HEAD to compare against.
+	wantNoFinding(t, stdout, "Git state")
+	wantContains(t, "Snapshots line", findingLine(t, stdout, "Snapshots"), "none yet")
+	wantContains(t, "Git handoff line", findingLine(t, stdout, "Git handoff"), "no .agentmod-handoff/ package")
 	wantContains(t, "Project line", findingLine(t, stdout, "Project"), root, filepath.Join(root, ".agentmod"))
 	wantContains(t, "Routing line", findingLine(t, stdout, "Routing env"), "applied for this project")
 	wantContains(t, "PATH line", findingLine(t, stdout, "PATH"), "on PATH once")
@@ -152,6 +158,11 @@ func TestDoctorOutsideProjectFreshMachineIsClean(t *testing.T) {
 	wantNoFinding(t, stdout, "Claude guard")
 	// Same for the restored-config portability scan.
 	wantNoFinding(t, stdout, "Agent config paths")
+	// Snapshots, git-handoff packages, and the HEAD comparison all live in a
+	// project's tree — no project, no lines.
+	wantNoFinding(t, stdout, "Snapshots")
+	wantNoFinding(t, stdout, "Git handoff")
+	wantNoFinding(t, stdout, "Git state")
 	// Binary presence is reported out here too (§23), informationally.
 	binaries := findingLine(t, stdout, "Agent binaries")
 	wantLevel(t, binaries, diagOK)
@@ -1227,4 +1238,193 @@ func TestDoctorRejectsArgs(t *testing.T) {
 		t.Fatalf("exit = %d, want %d", code, ExitError)
 	}
 	wantContains(t, "stderr", errBuf.String(), "doctor takes no arguments")
+}
+
+// defaultSnapshotName is the deterministic name `handoff create` picks for
+// root under fakeEnv's fixed clock.
+func defaultSnapshotName(root string) string {
+	return filepath.Base(root) + "-" + fakeNow.Format("20060102-150405") + ".amod"
+}
+
+func TestDoctorSnapshotCleanIsOK(t *testing.T) {
+	// A clean snapshot keeps doctor at exit 0; the new lines also pin the
+	// no-repo Git-state wording (the manifest carries no git key here).
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	env := fakeEnv(root, healthyVars(t, root))
+	if code, _, stderr := runHandoffForTest(t, env, "create"); code != ExitOK {
+		t.Fatalf("create exit = %d\nstderr: %s", code, stderr)
+	}
+	code, stdout, _ := runDoctorForTest(t, env)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+	}
+	snaps := findingLine(t, stdout, "Snapshots")
+	wantLevel(t, snaps, diagOK)
+	wantContains(t, "Snapshots line", snaps,
+		"1 snapshot(s)", defaultSnapshotName(root), "none record secret candidates")
+	gitState := findingLine(t, stdout, "Git state")
+	wantLevel(t, gitState, diagOK)
+	wantContains(t, "Git state line", gitState,
+		defaultSnapshotName(root), "records no git HEAD; nothing to compare")
+}
+
+func TestDoctorSnapshotSecretCandidatesWarn(t *testing.T) {
+	// §23 "Snapshot containing secret candidates": a snapshot packed with
+	// --allow-findings carries its scan results in REDACTION.md; doctor must
+	// re-surface them (counts only — never the matched bytes).
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	notes := filepath.Join(root, ".agentmod", "claude", "notes.txt")
+	fixture := "-----BEGIN FAKE PRIVATE KEY-----\nAKIAFAKEFIXTUREKEY00\n"
+	if err := os.WriteFile(notes, []byte(fixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := fakeEnv(root, healthyVars(t, root))
+	if code, _, stderr := runHandoffForTest(t, env, "create", "--allow-findings"); code != ExitOK {
+		t.Fatalf("create exit = %d\nstderr: %s", code, stderr)
+	}
+	code, stdout, _ := runDoctorForTest(t, env)
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "Snapshots")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "Snapshots line", line,
+		defaultSnapshotName(root), "packs 2 secret candidate(s), 1 HARD",
+		"agentmod handoff inspect", "before sharing it")
+	if strings.Contains(stdout, "AKIA") || strings.Contains(stdout, "PRIVATE KEY") {
+		t.Errorf("doctor output reproduces matched secret bytes:\n%s", stdout)
+	}
+}
+
+func TestDoctorSnapshotUnreadableWarn(t *testing.T) {
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	bad := filepath.Join(root, ".agentmod", layout.SnapshotsDir, "bad.amod")
+	if err := os.WriteFile(bad, []byte("not a zip"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "Snapshots")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "Snapshots line", line,
+		"bad.amod", "not a readable .amod snapshot", "agentmod handoff verify")
+	// The newest (only) snapshot is unreadable, so there is no git state to
+	// compare — the warn above already covers it.
+	wantNoFinding(t, stdout, "Git state")
+}
+
+func TestDoctorGitHandoffCleanPackage(t *testing.T) {
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	env := fakeEnv(root, healthyVars(t, root))
+	if code, _, stderr := runHandoffForTest(t, env, "create", "--for-git"); code != ExitOK {
+		t.Fatalf("create --for-git exit = %d\nstderr: %s", code, stderr)
+	}
+	code, stdout, _ := runDoctorForTest(t, env)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+	}
+	line := findingLine(t, stdout, "Git handoff")
+	wantLevel(t, line, diagOK)
+	wantContains(t, "Git handoff line", line, "package present; no session or log material inside")
+}
+
+func TestDoctorGitHandoffSessionLeakWarn(t *testing.T) {
+	// §23 "Git Handoff containing unencrypted sessions": agentmod's own
+	// --for-git create can never pack sessions/logs, so doctor audits the
+	// committed-to-be tree for hand-added material — one session dir, one
+	// session file, one log dir, each reported with the rule that owns it.
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	env := fakeEnv(root, healthyVars(t, root))
+	if code, _, stderr := runHandoffForTest(t, env, "create", "--for-git"); code != ExitOK {
+		t.Fatalf("create --for-git exit = %d\nstderr: %s", code, stderr)
+	}
+	payload := filepath.Join(root, ".agentmod-handoff", "payload", ".agentmod")
+	for rel, content := range map[string]string{
+		"claude/projects/p1/chat.jsonl": "{\"role\":\"user\"}\n",
+		"codex/history.jsonl":           "{}\n",
+		"logs/run.log":                  "started\n",
+	} {
+		path := filepath.Join(payload, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, stdout, _ := runDoctorForTest(t, env)
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "Git handoff")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "Git handoff line", line,
+		"a commit would publish unencrypted",
+		// Sorted; pruned directories report once with a trailing slash.
+		".agentmod/claude/projects/ (session-data), .agentmod/codex/history.jsonl (session-data), .agentmod/logs/ (log-data)",
+		"recreate the package with 'agentmod pack --for-git'")
+}
+
+func TestDoctorGitHandoffForeignDirWarn(t *testing.T) {
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	if err := os.MkdirAll(filepath.Join(root, ".agentmod-handoff"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ := runDoctorForTest(t, fakeEnv(root, healthyVars(t, root)))
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line := findingLine(t, stdout, "Git handoff")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "Git handoff line", line, "has no manifest.json", "not an agentmod package")
+}
+
+func TestDoctorGitStateHeadMatchThenDrift(t *testing.T) {
+	// §23 "Restore-target Git HEAD differing from the snapshot": the newest
+	// snapshot records the HEAD it was created at; doctor compares it
+	// against the repository's current HEAD (the one doctor check that
+	// executes git — read-only, D039 env).
+	root := makeProject(t, config.Default())
+	mkLayout(t, root)
+	runGitFixture(t, root, "init", "--quiet")
+	runGitFixture(t, root, "add", "-A")
+	runGitFixture(t, root, "commit", "--quiet", "-m", "base")
+
+	env := fakeEnv(root, healthyVars(t, root))
+	if code, _, stderr := runHandoffForTest(t, env, "create"); code != ExitOK {
+		t.Fatalf("create exit = %d\nstderr: %s", code, stderr)
+	}
+
+	code, stdout, _ := runDoctorForTest(t, env)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitOK, stdout)
+	}
+	line := findingLine(t, stdout, "Git state")
+	wantLevel(t, line, diagOK)
+	wantContains(t, "Git state line", line, "matches the newest snapshot", defaultSnapshotName(root))
+
+	// A new commit moves HEAD away from the snapshot's recorded state.
+	if err := os.WriteFile(filepath.Join(root, "drift.txt"), []byte("drift\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitFixture(t, root, "add", "drift.txt")
+	runGitFixture(t, root, "commit", "--quiet", "-m", "drift")
+
+	code, stdout, _ = runDoctorForTest(t, env)
+	if code != ExitValidation {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitValidation, stdout)
+	}
+	line = findingLine(t, stdout, "Git state")
+	wantLevel(t, line, diagWarn)
+	wantContains(t, "Git state line", line,
+		"differs from", defaultSnapshotName(root),
+		"resumes agent context from a different source state")
 }

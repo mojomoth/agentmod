@@ -1,14 +1,29 @@
 # STATE — current implementation state
 
-Last updated: 2026-06-11 (iteration: Phase 8 slice 3 — README.md)
+Last updated: 2026-06-12 (iteration: doctor's last three §23 must-warn
+rows, D053 — T29 ✅)
 
 ## Where things stand
 - Phase 8 IN PROGRESS: slice 1 (§27.1–§27.4 isolation matrix,
   TestScenarioIsolationMatrix, D050) + slice 2 (§27.5/§27.6 cli-level
   scenario tests, D051; T30 ✅) + slice 3 (README.md) + slice 4
   (LICENSE/SECURITY/CONTRIBUTING/CHANGELOG/CODE_OF_CONDUCT — committed by
-  the supervising session after content-filter blocks, D052) done.
+  the supervising session after content-filter blocks, D052) + slice 5
+  (doctor's last three §23 must-warn rows, D053; T29 ✅ — the final audit
+  found T29 still 🟡 and finished it BEFORE declaring anything) done.
   ONLY ONE TASK REMAINS: the final §28/§29 audit + final report + DONE.md.
+  The TEST_MATRIX is now ALL ✅ — no known gap stands between this state
+  and the audit.
+- doctor §23 completion (D053, read it before touching doctor/snapshot
+  audit code): "Snapshots" re-surfaces each snapshot's REDACTION.md scan
+  counts via handoff.RedactionFindingCounts (never re-scans payload,
+  never prints matched bytes); "Git handoff" audits .agentmod-handoff/
+  payload with handoff.GitPublishRules (sessions/logs a commit would
+  publish); "Git state" compares repo HEAD to the newest snapshot's
+  recorded HEAD — the ONE doctor check that executes git (read-only,
+  D039 env). 7 new doctor tests + redaction_test.go round trip; binary
+  smoke in /tmp passed (warn/ok/drift shapes). Restore's inline doctor
+  gains only ok lines (restored snapshots/ is empty; no package dir).
 - CAUTION (D052): run-3 iterations 47–61 were each blocked by the API
   content filter ("Output blocked by content filtering policy") while
   working on the docs slice — most likely from emitting Contributor
@@ -1095,27 +1110,34 @@ homes were never touched. D051 iteration: `~/.codex` mtime still the
 20:33 reading; all three homes + skills list match baseline.
 README iteration: same — `~/.codex` mtime still 20:33, all three homes
 + skills list match baseline; docs-only iteration, zero global reads
-beyond the audit `ls`.)
+beyond the audit `ls`.
+D053 iteration (2026-06-12): `~/.codex` mtime drifted to 12:04 — read-only
+`ls` confirms zero agentmod-named entries (user's own codex runtime churn
+again); `~/.claude`, `~/.config/opencode` and the skills list match
+baseline. The /tmp binary smoke used only /tmp trees and never set HOME —
+the dev-harness guard correctly blocked the one attempted `export HOME=`
+smoke line, which was rewritten to run against the real (read-only) HOME.)
 
 ## Failing tests
 None. All checks green as of this iteration's end.
 
 ## Exact next step
-Phase 8, fourth item: LICENSE, SECURITY.md, CONTRIBUTING.md,
-CHANGELOG.md, CODE_OF_CONDUCT.md in ONE slice (FABLE_PLAN §30 names
-all five; GOAL §29 requires them to exist). Choices to settle and
-record in DECISIONS.md: license (MIT is the conventional default for
-a Go CLI like this — nothing in FABLE_PLAN/GOAL mandates one, so pick
-and record); SECURITY.md should describe the threat model honestly
-(guard = heuristic, snapshots = untrusted input on restore, secret
-scan = heuristic, report channel); CHANGELOG.md starts at the current
-0.1.0-dev with a summary of the MVP feature set; CONTRIBUTING.md
-points at go test ./... + gofmt + the no-global-pollution test rules
-(fake homes via injected Env, never real HOME); CODE_OF_CONDUCT.md =
-Contributor Covenant. After the LICENSE file lands, ADD a license
-section/badge line to README.md (deliberately omitted now so README
-never references a nonexistent file). Then: final §28/§29 audit +
-final report + DONE.md (CHECKS.md §6 gate; loop.sh re-verifies).
+The final §28/§29 audit + final report + DONE.md (CHECKS.md §6 gate;
+loop.sh re-verifies `go test ./...` independently). This iteration
+already walked the matrix far enough to find and fix the one real gap
+(T29, D053); the audit iteration should now: (1) run all CHECKS.md
+sections; (2) walk FABLE_PLAN §28 line by line — every prohibition must
+be false (note README already carries the four mandatory limitation
+bullets; STATE/DONE/TEST_MATRIX are updated each iteration); (3) walk
+§29 line by line — every condition should now be checkable TRUE against
+code/tests/docs that exist (TEST_MATRIX all ✅); (4) write the final
+report into DONE.md (what was built, test summary, scenario results,
+known limitations, pointers to README/IMPLEMENTATION_PLAN) and set
+`STATUS: DONE`. Keep the report prose technical and original (D052:
+content-filter risk — never paste the Contributor Covenant or large
+policy boilerplate). README's doctor section was already extended with
+the three new D053 findings in the same iteration, so no doc drift is
+pending.
 
 ## Cautions for the next iteration
 - Guard blocks shell output-redirection (`>>`) to absolute paths under $HOME

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -87,6 +89,9 @@ func runDoctor(args []string, stdout, stderr io.Writer, env Env) int {
 		findings = append(findings, shimFinding(proj.AgentmodDir))
 		findings = append(findings, gstackProjectFinding(proj.AgentmodDir))
 		findings = append(findings, agentConfigPathFindings(proj.AgentmodDir)...)
+		findings = append(findings, snapshotFindings(proj.AgentmodDir)...)
+		findings = append(findings, gitHandoffFinding(proj.Root))
+		findings = append(findings, gitStateFinding(proj.Root, proj.AgentmodDir)...)
 	}
 	findings = append(findings, agentBinariesFinding(env))
 	findings = append(findings, gstackGlobalFinding(env))
@@ -719,4 +724,147 @@ func hasAgentmodElement(p string) bool {
 		}
 	}
 	return false
+}
+
+// snapshotFindings audits .agentmod/snapshots/ (§23 "Snapshot directory
+// state" + "Snapshot containing secret candidates"). Create already scanned
+// every packed file and wrote the results into the snapshot's REDACTION.md
+// (D036); doctor re-surfaces them so a snapshot carrying warn findings — or
+// HARD ones packed under --allow-findings — is never shared unnoticed.
+// Read-only: Open parses root members without extracting anything.
+func snapshotFindings(agentmodDir string) []finding {
+	dir := filepath.Join(agentmodDir, layout.SnapshotsDir)
+	files := listSnapshotFiles(dir)
+	if len(files) == 0 {
+		return []finding{{diagOK, "Snapshots", "none yet in " + dir}}
+	}
+	var problems []finding
+	for _, f := range files {
+		full := filepath.Join(dir, f.Name)
+		snap, err := handoff.Open(full)
+		if err != nil {
+			problems = append(problems, finding{diagWarn, "Snapshots",
+				fmt.Sprintf("%v — 'agentmod handoff verify %s' has details", err, full)})
+			continue
+		}
+		total, hard := handoff.RedactionFindingCounts(snap.Redaction)
+		snap.Close()
+		if total == 0 {
+			continue
+		}
+		detail := fmt.Sprintf("%s packs %d secret candidate(s)", f.Name, total)
+		if hard > 0 {
+			detail += fmt.Sprintf(", %d HARD", hard)
+		}
+		detail += fmt.Sprintf(" — review 'agentmod handoff inspect %s' before sharing it", full)
+		problems = append(problems, finding{diagWarn, "Snapshots", detail})
+	}
+	if len(problems) == 0 {
+		return []finding{{diagOK, "Snapshots", fmt.Sprintf(
+			"%d snapshot(s) in %s (newest %s); none record secret candidates", len(files), dir, files[0].Name)}}
+	}
+	return problems
+}
+
+// gitHandoffFinding audits an existing .agentmod-handoff/ package for
+// session or log material (§23 "Git Handoff containing unencrypted
+// sessions"). agentmod's own --for-git create can never pack those entries
+// (ForGitRules, D048), so a hit means the tree was edited by hand or
+// produced by another tool — committing it would publish per-machine
+// conversation history with the repository.
+func gitHandoffFinding(projectRoot string) finding {
+	dir := filepath.Join(projectRoot, handoff.GitDirName)
+	info, err := os.Lstat(dir)
+	switch {
+	case os.IsNotExist(err):
+		return finding{diagOK, "Git handoff", "no " + handoff.GitDirName + "/ package at the project root"}
+	case err != nil:
+		return finding{diagWarn, "Git handoff", err.Error()}
+	case !info.IsDir():
+		return finding{diagWarn, "Git handoff", dir + " is not a directory — not an agentmod package ('agentmod pack --for-git' refuses to replace it)"}
+	}
+	if _, err := os.Stat(filepath.Join(dir, handoff.ManifestName)); err != nil {
+		return finding{diagWarn, "Git handoff", dir + " has no " + handoff.ManifestName + " — not an agentmod package"}
+	}
+	payloadRoot := filepath.Join(dir, strings.TrimSuffix(handoff.PayloadPrefix, "/"))
+	rules := handoff.GitPublishRules()
+	var leaks []string
+	walkErr := filepath.WalkDir(payloadRoot, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, rerr := filepath.Rel(payloadRoot, p)
+		if rerr != nil || rel == "." {
+			return nil
+		}
+		// Rules match the same project-root-relative forward-slash paths the
+		// create-time walk feeds them; payload/ mirrors the project root.
+		rel = filepath.ToSlash(rel)
+		for _, r := range rules {
+			if !r.Matches(rel, path.Base(rel), d.IsDir()) {
+				continue
+			}
+			if d.IsDir() {
+				leaks = append(leaks, rel+"/ ("+r.ID+")")
+				return fs.SkipDir // report the pruned subtree once
+			}
+			leaks = append(leaks, rel+" ("+r.ID+")")
+			break
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return finding{diagWarn, "Git handoff", fmt.Sprintf("cannot audit %s: %v", dir, walkErr)}
+	}
+	if len(leaks) > 0 {
+		sort.Strings(leaks)
+		return finding{diagWarn, "Git handoff", fmt.Sprintf(
+			"%s/ contains session/log material that a commit would publish unencrypted (FABLE_PLAN §19): %s — recreate the package with 'agentmod pack --for-git'",
+			handoff.GitDirName, strings.Join(leaks, ", "))}
+	}
+	return finding{diagOK, "Git handoff", handoff.GitDirName + "/ package present; no session or log material inside"}
+}
+
+// gitStateFinding compares the repository's HEAD against the newest
+// snapshot's recorded git state (§23 "Git state" + "Restore-target Git HEAD
+// differing from the snapshot"): restoring a snapshot onto a different
+// commit resumes agent context from another source state, worth knowing
+// before 'agentmod handoff restore'. This is the one doctor subject that
+// executes git (read-only — collectGitState sets GIT_OPTIONAL_LOCKS=0,
+// D039); every other finding works from the injected Env alone. No
+// snapshots, or an unreadable newest one, yields no line — snapshotFindings
+// already reported that state.
+func gitStateFinding(projectRoot, agentmodDir string) []finding {
+	dir := filepath.Join(agentmodDir, layout.SnapshotsDir)
+	files := listSnapshotFiles(dir)
+	if len(files) == 0 {
+		return nil
+	}
+	newest := files[0].Name
+	snap, err := handoff.Open(filepath.Join(dir, newest))
+	if err != nil {
+		return nil // snapshotFindings warned about it already
+	}
+	gs := snap.Manifest.Git
+	snap.Close()
+	if gs == nil || gs.Head == "" {
+		return []finding{{diagOK, "Git state", fmt.Sprintf(
+			"newest snapshot %s records no git HEAD; nothing to compare", newest)}}
+	}
+	cur, note := collectGitState(projectRoot)
+	if cur == nil {
+		return []finding{{diagOK, "Git state", fmt.Sprintf(
+			"cannot compare against newest snapshot %s (%s)", newest, note)}}
+	}
+	if cur.Head == gs.Head {
+		return []finding{{diagOK, "Git state", fmt.Sprintf(
+			"repository HEAD %.12s matches the newest snapshot %s", cur.Head, newest)}}
+	}
+	curHead := "none (unborn branch)"
+	if cur.Head != "" {
+		curHead = fmt.Sprintf("%.12s", cur.Head)
+	}
+	return []finding{{diagWarn, "Git state", fmt.Sprintf(
+		"repository HEAD %s differs from %.12s recorded in the newest snapshot %s — restoring it resumes agent context from a different source state",
+		curHead, gs.Head, newest)}}
 }

@@ -1515,3 +1515,63 @@ Loop guidance added to STATE.md: never paste the Contributor Covenant; the
 §30 docs are done — do not rewrite them. Garbage logs archived to
 reports/run3-contentfiltered/. Run 4 needs only the final §28/§29 audit +
 final report + DONE.md.
+
+## D053 — 2026-06-12 — Doctor's last three §23 must-warn rows (T29 done)
+The final-audit iteration found T29 still 🟡: §23's must-warn list has
+three rows earlier slices mapped to "Phases 7–8" and no one picked up —
+"Snapshot containing secret candidates", "Git Handoff containing
+unencrypted sessions", "Restore-target Git HEAD differing from the
+snapshot". Declaring DONE with them missing would be a false completion
+(the spec says doctor MUST warn), so this iteration implemented them
+before the audit. All three are inside-project findings appended after
+agentConfigPathFindings; doctor stays read-only.
+- **"Snapshots" (snapshotFindings)**: every `.amod` in snapshots/ is
+  Opened (root members only, nothing extracted) and its REDACTION.md is
+  parsed back into counts by the new
+  `handoff.RedactionFindingCounts(report) (total, hard)` — create-time
+  scan results are re-surfaced, payload content is NEVER re-scanned (the
+  scan ran when the bytes were packed; re-deriving from the report keeps
+  doctor cheap and consistent with what the recipient will read). The
+  parser keys off the `## Secret-candidate scan` heading (renderRedaction
+  now shares the `scanHeading` const so they cannot drift) and counts
+  only list items in that section, so exclusion-list items never inflate
+  it. Any findings → one warn per snapshot naming total + HARD counts +
+  the inspect command; never the matched bytes. Unreadable snapshot →
+  warn pointing at `handoff verify`. None/clean → single ok line (also
+  covers §23 "Snapshot directory state").
+- **"Git handoff" (gitHandoffFinding)**: audits an existing
+  `.agentmod-handoff/` via the new `handoff.GitPublishRules()` (= just
+  sessionDataRule + logDataRule, exported for this consumer): WalkDir
+  over payload/ — rel paths under payload/ ARE the project-root-relative
+  paths the rules match — warn listing every hit sorted, pruned dirs once
+  with trailing "/", remedy = recreate with `pack --for-git`. agentmod's
+  own CreateForGit can never pack these (D048), so a hit means hand-
+  edited or foreign tooling. No manifest.json / non-dir → warn (not a
+  package); absent → ok line.
+- **"Git state" (gitStateFinding)**: compares the repository's current
+  HEAD against the NEWEST snapshot's manifest.Git.Head (newest-only by
+  decision: that is the one `handoff restore` of the default listing
+  would resume from; auditing every snapshot would warn forever on old
+  history). This is the ONE doctor subject that executes git —
+  collectGitState (D039: read-only, GIT_OPTIONAL_LOCKS=0,
+  GIT_TERMINAL_PROMPT=0); recorded here because doctor was previously
+  injected-Env-only. No snapshots / newest unreadable → no line
+  (snapshotFindings owns those states); no recorded HEAD / no repo / no
+  git binary → ok with the reason; equal → ok; differ → warn naming both
+  12-char HEADs + the snapshot.
+- Tests: 7 new funcs in doctor_test.go (clean-snapshot ok + no-git-key
+  wording, --allow-findings snapshot warn w/ "2 candidate(s), 1 HARD" +
+  no-secret-bytes-in-output assertion, garbage .amod warn + no Git-state
+  line, clean --for-git package ok, hand-injected session/log leak warn
+  w/ exact sorted entry list, manifest-less dir warn, real-git HEAD
+  match→drift via runGitFixture w/ requireGit skip) + new
+  `defaultSnapshotName` helper; AllHealthy + fresh-machine tests grew the
+  new ok-line/no-line assertions. internal/handoff grew
+  redaction_test.go (render→parse round trip ×3, exclusion items never
+  count). Binary smoke in /tmp: secret-snapshot warn, HEAD match→drift
+  warn, foreign-dir warn all fired; pack --for-git dirty-gate refusal in
+  the smoke is the documented D039 interplay, not a bug.
+- Post-restore interplay checked: restore's inline doctor (D045) now
+  prints the three new subjects too — restored projects have empty
+  snapshots/ (never travels) and no `.agentmod-handoff/`, so they add ok
+  lines only; no existing test needed changes (all passed unmodified).

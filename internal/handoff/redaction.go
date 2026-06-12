@@ -15,6 +15,33 @@ import (
 // RedactionName is the redaction report's zip member name.
 const RedactionName = "REDACTION.md"
 
+// scanHeading is the report section renderRedaction writes the scan
+// findings under; RedactionFindingCounts keys off it when parsing.
+const scanHeading = "## Secret-candidate scan"
+
+// RedactionFindingCounts parses a rendered REDACTION.md back into its
+// secret-candidate counts: every finding listed under the scan heading,
+// and how many of them were HARD findings packed under --allow-findings.
+// doctor uses it to re-surface a snapshot's create-time scan without
+// re-reading payload content; it counts only list items in the scan
+// section, so the exclusion list above it never inflates the numbers.
+func RedactionFindingCounts(report []byte) (total, hard int) {
+	inScan := false
+	for _, line := range strings.Split(string(report), "\n") {
+		if strings.HasPrefix(line, "## ") {
+			inScan = strings.TrimSpace(line) == scanHeading
+			continue
+		}
+		if inScan && strings.HasPrefix(line, "- ") {
+			total++
+			if strings.Contains(line, "(HARD finding") {
+				hard++
+			}
+		}
+	}
+	return total, hard
+}
+
 // renderRedaction produces the REDACTION.md member. All inputs are already
 // in deterministic (walk/pattern) order, so identical snapshots render
 // byte-identical reports.
@@ -32,7 +59,7 @@ func renderRedaction(createdAt time.Time, version string, excluded []ExcludedEnt
 			fmt.Fprintf(&b, "- `%s` — %s: %s\n", e.Path, e.RuleID, e.Reason)
 		}
 	}
-	b.WriteString("\n## Secret-candidate scan\n\n")
+	b.WriteString("\n" + scanHeading + "\n\n")
 	if len(findings) == 0 {
 		b.WriteString("No secret candidates were found in the packed files.\n")
 	} else {

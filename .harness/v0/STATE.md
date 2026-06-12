@@ -5,9 +5,17 @@ Last updated: 2026-06-11 (iteration: Phase 8 slice 3 — README.md)
 ## Where things stand
 - Phase 8 IN PROGRESS: slice 1 (§27.1–§27.4 isolation matrix,
   TestScenarioIsolationMatrix, D050) + slice 2 (§27.5/§27.6 cli-level
-  scenario tests, D051; T30 ✅) + slice 3 (README.md) done.
-  Next: LICENSE/SECURITY/CONTRIBUTING/CHANGELOG/CODE_OF_CONDUCT (one
-  slice), then the final §28/§29 audit + DONE.md.
+  scenario tests, D051; T30 ✅) + slice 3 (README.md) + slice 4
+  (LICENSE/SECURITY/CONTRIBUTING/CHANGELOG/CODE_OF_CONDUCT — committed by
+  the supervising session after content-filter blocks, D052) done.
+  ONLY ONE TASK REMAINS: the final §28/§29 audit + final report + DONE.md.
+- CAUTION (D052): run-3 iterations 47–61 were each blocked by the API
+  content filter ("Output blocked by content filtering policy") while
+  working on the docs slice — most likely from emitting Contributor
+  Covenant text verbatim. Do NOT paste the Contributor Covenant or
+  reproduce large blocks of policy text about harassment; all six §30
+  docs already exist and must not be rewritten. Keep final-report prose
+  technical and your own.
 - Phase 7 COMPLETE: slice 1 (git handoff tree writer, D047) + slice 2
   (sessions/logs excluded via ForGitRules, --include-sessions always
   refuses, D048; T28 ✅) + final item (pack --for-git pinned by tests;

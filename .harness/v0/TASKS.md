@@ -180,5 +180,9 @@ Add/split items freely; keep units small.
        §28-mandatory limitations PLUS D016/D018/D049/D034-D040/D035
        honest notes, FAQ; command syntax + stamp format verified against
        the real binary — no product code change)
-- [ ] LICENSE, SECURITY.md, CONTRIBUTING.md, CHANGELOG.md, CODE_OF_CONDUCT.md
+- [x] LICENSE, SECURITY.md, CONTRIBUTING.md, CHANGELOG.md, CODE_OF_CONDUCT.md
+      (loop iterations wrote the first four but were repeatedly output-blocked
+       by the content filter before committing — see D052; CODE_OF_CONDUCT.md
+       was written as an original short policy, NOT the verbatim Contributor
+       Covenant, and the slice was committed by the supervising session)
 - [ ] Final §28/§29 audit + final report + DONE.md

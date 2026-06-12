@@ -1500,3 +1500,18 @@ stub gone). Read D034+D040–D044+this before touching restore output.
 - **T30 flips ✅** — Phase 8 continues with README.md (remember: D049
   manual tree restore, D016 pnpm/bun bins off PATH, D018 non-interactive
   bash, §28's four mandatory limitation bullets).
+
+## D052 — 2026-06-12 — Docs slice finished by supervisor after content-filter blocks
+Run-3 iterations 47–61 (15 attempts) each did ~2 minutes of work on the
+final docs slice and were then killed by "API Error: 400 Output blocked by
+content filtering policy" — never committing. Evidence: LICENSE, SECURITY.md,
+CONTRIBUTING.md, CHANGELOG.md present but untracked; CODE_OF_CONDUCT.md
+absent. Best explanation: emitting Contributor Covenant boilerplate
+(verbatim harassment-enumeration text) trips the filter in print mode.
+Resolution by the supervising session: reviewed the four written docs
+(content sound), authored CODE_OF_CONDUCT.md as a SHORT ORIGINAL policy
+instead of the covenant, verified build/vet/gofmt/tests green, committed.
+Loop guidance added to STATE.md: never paste the Contributor Covenant; the
+§30 docs are done — do not rewrite them. Garbage logs archived to
+reports/run3-contentfiltered/. Run 4 needs only the final §28/§29 audit +
+final report + DONE.md.

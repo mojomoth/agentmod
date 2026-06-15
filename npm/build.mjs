@@ -140,6 +140,10 @@ function main() {
     console.log("dry run (pass --publish to publish)");
     return;
   }
+  if (!process.env.NODE_AUTH_TOKEN && !process.env.NPM_TOKEN) {
+    console.log("no npm auth token (NODE_AUTH_TOKEN) set — skipping publish");
+    return;
+  }
   for (const p of platformPkgs) {
     console.log(`publishing ${p.name}@${version}`);
     npmPublish(p.pkgDir);

@@ -11,9 +11,12 @@ coverage.out
 # Harness iteration logs (keep the directory, not the logs)
 .harness/v0/reports/*.log
 .harness/v0/reports/*/*.log
+.harness/v1/reports/*.log
+.harness/v1/reports/*/*.log
 
 # OS noise
 .DS_Store
+*.textClipping
 
 # Environments
 .env

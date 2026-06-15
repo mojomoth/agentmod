@@ -31,7 +31,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SCOPE = "@agentmod";
+const SCOPE = "@mojomoth";
 const PLATFORM_PREFIX = `${SCOPE}/cli`;
 const MAIN_PKG = "agentmod";
 

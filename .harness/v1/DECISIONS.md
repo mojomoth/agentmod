@@ -32,9 +32,13 @@
   `GITHUB_TOKEN` only reaches the current repo; the tap and bucket are separate
   repos, hence a PAT.
 
-- **D8. npm scope `@agentmod`, launcher name `agentmod`.** Defined as constants
-  in `npm/build.mjs` and `npm/agentmod/package.json`. If unavailable on the
-  registry, change them in those two places (see RISKS R2).
+- **D8. npm scope `@mojomoth`, launcher name `agentmod` (unscoped).** Defined as
+  constants in `npm/build.mjs` (`SCOPE`), `npm/agentmod/bin/agentmod.js`
+  (`SCOPE`), and the optionalDependencies in `npm/agentmod/package.json`.
+  Originally `@agentmod`, switched to `@mojomoth` at release time: the npm token
+  is the user `mojomoth`, whose own username-scope is publishable without
+  creating an org (the `@agentmod` org is not owned). Main package stays the
+  unscoped `agentmod`. To change scope again, edit those three places.
 
 - **D9. Goreleaser schema targets current v2** (`formats:` list,
   `brews:`/`scoops:`). The local dev box has no `goreleaser`; `goreleaser check`

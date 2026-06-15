@@ -11,10 +11,12 @@
 
 const { execFileSync } = require("node:child_process");
 
+const SCOPE = "@mojomoth";
+
 function resolveBinary() {
   const platform = process.platform; // "linux" | "darwin" | "win32" | ...
   const arch = process.arch; // "x64" | "arm64" | ...
-  const pkg = `@agentmod/cli-${platform}-${arch}`;
+  const pkg = `${SCOPE}/cli-${platform}-${arch}`;
   const binName = platform === "win32" ? "agentmod.exe" : "agentmod";
   try {
     return require.resolve(`${pkg}/bin/${binName}`);
@@ -27,7 +29,7 @@ const bin = resolveBinary();
 if (!bin) {
   process.stderr.write(
     `agentmod: no prebuilt binary available for ${process.platform}-${process.arch}.\n` +
-      `The matching package (@agentmod/cli-${process.platform}-${process.arch}) was not installed.\n` +
+      `The matching package (${SCOPE}/cli-${process.platform}-${process.arch}) was not installed.\n` +
       `This usually means the platform is unsupported or install ran with --no-optional / --omit=optional.\n` +
       `Alternatives:\n` +
       `  brew install mojomoth/tap/agentmod\n` +

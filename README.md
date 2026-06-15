@@ -64,11 +64,31 @@ Routing per agent can be switched off in `agentmod.toml`
 
 ## Install
 
-Build from source (Go 1.26+, the only module dependency is
+Pick whichever fits your setup — each installs the same single binary:
+
+```sh
+# Homebrew (macOS / Linux)
+brew install mojomoth/tap/agentmod
+
+# npm (installs the prebuilt binary for your platform)
+npm install -g agentmod
+
+# install script (downloads the matching release, verifies sha256)
+curl -fsSL https://raw.githubusercontent.com/mojomoth/agentmod/main/install.sh | sh
+
+# go install (requires the Go toolchain)
+go install github.com/mojomoth/agentmod@latest
+
+# Scoop (Windows)
+scoop bucket add mojomoth https://github.com/mojomoth/scoop-bucket
+scoop install agentmod
+```
+
+Or build from source (Go 1.26+, the only module dependency is
 `BurntSushi/toml`):
 
 ```sh
-git clone <this repository> && cd agentmod
+git clone https://github.com/mojomoth/agentmod && cd agentmod
 go build -o agentmod .
 # put the binary somewhere on your PATH
 ```

@@ -1,0 +1,91 @@
+# GoReleaser configuration for agentmod.
+#
+# Validate:  goreleaser check
+# Dry-run:   goreleaser release --snapshot --clean   (no publish; writes ./dist)
+# Release:   pushed automatically by .github/workflows/release.yml on a v* tag.
+#
+# Cross-repo publishing (the homebrew-tap and scoop-bucket live in separate
+# repos under the same owner) needs a token with access to those repos. The
+# workflow supplies it via the GITHUB_TOKEN environment variable, so no token
+# is referenced here. Docs: https://goreleaser.com
+version: 2
+
+project_name: agentmod
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: agentmod
+    main: .
+    binary: agentmod
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/mojomoth/agentmod/internal/cli.Version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: agentmod
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-dev"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+# Homebrew formula pushed to github.com/mojomoth/homebrew-tap
+# => brew install mojomoth/tap/agentmod
+brews:
+  - name: agentmod
+    repository:
+      owner: mojomoth
+      name: homebrew-tap
+    homepage: "https://github.com/mojomoth/agentmod"
+    description: "Per-project isolation and handoff for coding agent environments"
+    license: "MIT"
+    install: |
+      bin.install "agentmod"
+    test: |
+      system "#{bin}/agentmod", "version"
+
+# Scoop manifest pushed to github.com/mojomoth/scoop-bucket
+# => scoop bucket add mojomoth https://github.com/mojomoth/scoop-bucket
+#    scoop install agentmod
+scoops:
+  - name: agentmod
+    repository:
+      owner: mojomoth
+      name: scoop-bucket
+    homepage: "https://github.com/mojomoth/agentmod"
+    description: "Per-project isolation and handoff for coding agent environments"
+    license: MIT

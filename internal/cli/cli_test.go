@@ -47,6 +47,26 @@ func checkStream(t *testing.T, name, got, wantSubstring string) {
 	}
 }
 
+func TestResolveVersion(t *testing.T) {
+	orig := Version
+	defer func() { Version = orig }()
+
+	// An ldflags-injected value always wins over the build-info fallback.
+	Version = "v9.9.9"
+	if got := resolveVersion(); got != "v9.9.9" {
+		t.Errorf("resolveVersion() with ldflags = %q, want %q", got, "v9.9.9")
+	}
+
+	// With the dev sentinel and no usable build-info version (the usual case
+	// under `go test`), it must fall back gracefully — never empty, never the
+	// "(devel)" placeholder.
+	Version = devVersion
+	got := resolveVersion()
+	if got == "" || got == "(devel)" {
+		t.Errorf("resolveVersion() fallback = %q, want a non-empty real version", got)
+	}
+}
+
 func TestExitCodeContract(t *testing.T) {
 	// IMPLEMENTATION_PLAN §3 fixes these values; downstream packages and
 	// shell hooks will rely on them.

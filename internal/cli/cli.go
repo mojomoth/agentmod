@@ -5,11 +5,32 @@ package cli
 import (
 	"fmt"
 	"io"
+	"runtime/debug"
 )
 
 // Version is overridable at build time via
 // -ldflags "-X github.com/mojomoth/agentmod/internal/cli.Version=v1.2.3".
-var Version = "0.1.0-dev"
+// Release binaries (goreleaser) set it directly. devVersion is the sentinel
+// that means "no ldflags value was injected".
+const devVersion = "0.1.0-dev"
+
+var Version = devVersion
+
+// resolveVersion reports the version to print. An ldflags-injected value
+// always wins. Otherwise — e.g. `go install github.com/mojomoth/agentmod@v1.2.3`,
+// which does not pass ldflags — fall back to the module version embedded by
+// the Go toolchain so the tag still shows instead of the dev sentinel.
+func resolveVersion() string {
+	if Version != devVersion {
+		return Version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if v := info.Main.Version; v != "" && v != "(devel)" {
+			return v
+		}
+	}
+	return Version
+}
 
 // Exit codes (IMPLEMENTATION_PLAN §3).
 const (
@@ -111,7 +132,7 @@ func run(args []string, stdout, stderr io.Writer, env Env) int {
 	case "unpack":
 		return runHandoffRestore(args[1:], stdout, stderr, env)
 	case "version", "--version":
-		fmt.Fprintf(stdout, "agentmod %s\n", Version)
+		fmt.Fprintf(stdout, "agentmod %s\n", resolveVersion())
 		return ExitOK
 	case "help", "--help", "-h":
 		fmt.Fprint(stdout, usage)

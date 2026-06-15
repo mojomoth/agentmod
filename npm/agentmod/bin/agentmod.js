@@ -11,7 +11,7 @@
 
 const { execFileSync } = require("node:child_process");
 
-const SCOPE = "@mojomoth";
+const SCOPE = "@agentmod";
 
 function resolveBinary() {
   const platform = process.platform; // "linux" | "darwin" | "win32" | ...

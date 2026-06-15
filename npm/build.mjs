@@ -31,7 +31,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SCOPE = "@mojomoth";
+const SCOPE = "@agentmod";
 const PLATFORM_PREFIX = `${SCOPE}/cli`;
 const MAIN_PKG = "agentmod";
 
@@ -119,10 +119,11 @@ function buildMainPackage(version, platformNames) {
 }
 
 function npmPublish(pkgDir) {
-  execFileSync("npm", ["publish", "--access", "public"], {
-    cwd: pkgDir,
-    stdio: "inherit",
-  });
+  const args = ["publish", "--access", "public"];
+  // Fallback for accounts that enforce 2FA on writes and tokens without a
+  // 2FA bypass: a one-time code can be supplied via AGENTMOD_NPM_OTP.
+  if (process.env.AGENTMOD_NPM_OTP) args.push("--otp", process.env.AGENTMOD_NPM_OTP);
+  execFileSync("npm", args, { cwd: pkgDir, stdio: "inherit" });
 }
 
 function main() {

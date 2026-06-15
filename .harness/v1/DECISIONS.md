@@ -32,13 +32,18 @@
   `GITHUB_TOKEN` only reaches the current repo; the tap and bucket are separate
   repos, hence a PAT.
 
-- **D8. npm scope `@mojomoth`, launcher name `agentmod` (unscoped).** Defined as
+- **D8. npm scope `@agentmod`, launcher name `agentmod` (unscoped).** Defined as
   constants in `npm/build.mjs` (`SCOPE`), `npm/agentmod/bin/agentmod.js`
-  (`SCOPE`), and the optionalDependencies in `npm/agentmod/package.json`.
-  Originally `@agentmod`, switched to `@mojomoth` at release time: the npm token
-  is the user `mojomoth`, whose own username-scope is publishable without
-  creating an org (the `@agentmod` org is not owned). Main package stays the
-  unscoped `agentmod`. To change scope again, edit those three places.
+  (`SCOPE`), and the optionalDependencies in `npm/agentmod/package.json`. The
+  user `mojomoth` owns the npm org `@agentmod` (verified via `npm org ls
+  agentmod` → owner), so platform packages publish as `@agentmod/cli-<os>-<arch>`
+  and the main package stays the unscoped `agentmod`. (A brief detour to
+  `@mojomoth` was reverted once org ownership was confirmed.) To change scope,
+  edit those three places.
+  - **Publish requires a 2FA-exempt token.** The account enforces 2FA on writes;
+    the npm token must report `bypass_2fa: true` (check via GET
+    `registry.npmjs.org/-/npm/v1/tokens`). Otherwise pass a one-time code through
+    `AGENTMOD_NPM_OTP` to `build.mjs`.
 
 - **D9. Goreleaser schema targets current v2** (`formats:` list,
   `brews:`/`scoops:`). The local dev box has no `goreleaser`; `goreleaser check`

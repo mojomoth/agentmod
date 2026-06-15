@@ -24,8 +24,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agentmod/agentmod/internal/config"
-	"github.com/agentmod/agentmod/internal/handoff"
+	"github.com/mojomoth/agentmod/internal/config"
+	"github.com/mojomoth/agentmod/internal/handoff"
 )
 
 // mockAgentBins writes fake claude/codex/opencode executables into a fresh

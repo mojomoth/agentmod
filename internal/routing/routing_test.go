@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/agentmod/agentmod/internal/config"
+	"github.com/mojomoth/agentmod/internal/config"
 )
 
 func names(vars []Var) []string {

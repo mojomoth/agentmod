@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agentmod/agentmod/internal/config"
-	"github.com/agentmod/agentmod/internal/handoff"
+	"github.com/mojomoth/agentmod/internal/config"
+	"github.com/mojomoth/agentmod/internal/handoff"
 )
 
 func runHandoffForTest(t *testing.T, env Env, args ...string) (code int, stdout, stderr string) {

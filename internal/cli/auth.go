@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/agentmod/agentmod/internal/layout"
+	"github.com/mojomoth/agentmod/internal/layout"
 )
 
 // Global agent home directory names under $HOME (FABLE_PLAN §3/§12). The

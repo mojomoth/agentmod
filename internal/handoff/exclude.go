@@ -13,8 +13,8 @@ package handoff
 import (
 	"strings"
 
-	"github.com/agentmod/agentmod/internal/layout"
-	"github.com/agentmod/agentmod/internal/project"
+	"github.com/mojomoth/agentmod/internal/layout"
+	"github.com/mojomoth/agentmod/internal/project"
 )
 
 // Rule is one name/path-based exclusion policy. Matches receives the

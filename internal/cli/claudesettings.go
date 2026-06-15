@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/agentmod/agentmod/internal/layout"
+	"github.com/mojomoth/agentmod/internal/layout"
 )
 
 // claudeSettingsFile is the settings file inside the ROUTED Claude home

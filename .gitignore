@@ -14,3 +14,7 @@ coverage.out
 
 # OS noise
 .DS_Store
+
+# Environments
+.env
+.env.local

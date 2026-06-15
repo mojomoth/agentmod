@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agentmod/agentmod/internal/config"
-	"github.com/agentmod/agentmod/internal/layout"
-	"github.com/agentmod/agentmod/internal/project"
-	"github.com/agentmod/agentmod/internal/routing"
+	"github.com/mojomoth/agentmod/internal/config"
+	"github.com/mojomoth/agentmod/internal/layout"
+	"github.com/mojomoth/agentmod/internal/project"
+	"github.com/mojomoth/agentmod/internal/routing"
 )
 
 // Env carries the parts of the process environment the CLI reads, so tests

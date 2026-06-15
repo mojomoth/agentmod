@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agentmod/agentmod/internal/config"
+	"github.com/mojomoth/agentmod/internal/config"
 )
 
 func runEnvForTest(t *testing.T, env Env, args ...string) (code int, stdout, stderr string) {

@@ -12,11 +12,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/agentmod/agentmod/internal/config"
-	"github.com/agentmod/agentmod/internal/handoff"
-	"github.com/agentmod/agentmod/internal/layout"
-	"github.com/agentmod/agentmod/internal/project"
-	"github.com/agentmod/agentmod/internal/routing"
+	"github.com/mojomoth/agentmod/internal/config"
+	"github.com/mojomoth/agentmod/internal/handoff"
+	"github.com/mojomoth/agentmod/internal/layout"
+	"github.com/mojomoth/agentmod/internal/project"
+	"github.com/mojomoth/agentmod/internal/routing"
 )
 
 // Severity levels of a doctor finding. ok is informational; warn and error

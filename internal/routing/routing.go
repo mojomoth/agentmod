@@ -11,8 +11,8 @@ package routing
 import (
 	"path/filepath"
 
-	"github.com/agentmod/agentmod/internal/config"
-	"github.com/agentmod/agentmod/internal/layout"
+	"github.com/mojomoth/agentmod/internal/config"
+	"github.com/mojomoth/agentmod/internal/layout"
 )
 
 // Bookkeeping variables owned by agentmod (uppercase per FABLE_PLAN §14).

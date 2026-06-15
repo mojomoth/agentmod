@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/agentmod/agentmod/internal/cli"
+	"github.com/mojomoth/agentmod/internal/cli"
 )
 
 func main() {

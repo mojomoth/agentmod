@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agentmod/agentmod/internal/config"
-	"github.com/agentmod/agentmod/internal/layout"
-	"github.com/agentmod/agentmod/internal/project"
+	"github.com/mojomoth/agentmod/internal/config"
+	"github.com/mojomoth/agentmod/internal/layout"
+	"github.com/mojomoth/agentmod/internal/project"
 )
 
 func runInitForTest(t *testing.T, cwd string, flags ...string) (code int, stdout, stderr string) {

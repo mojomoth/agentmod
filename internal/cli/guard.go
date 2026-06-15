@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/agentmod/agentmod/internal/guard"
+	"github.com/mojomoth/agentmod/internal/guard"
 )
 
 // exitGuardDeny is the PreToolUse hook protocol's blocking exit code

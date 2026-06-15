@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/agentmod/agentmod/internal/handoff"
+	"github.com/mojomoth/agentmod/internal/handoff"
 )
 
 // collectGitState gathers the FABLE_PLAN §20 manifest metadata for the git

@@ -8,7 +8,7 @@ import (
 )
 
 // Version is overridable at build time via
-// -ldflags "-X github.com/agentmod/agentmod/internal/cli.Version=v1.2.3".
+// -ldflags "-X github.com/mojomoth/agentmod/internal/cli.Version=v1.2.3".
 var Version = "0.1.0-dev"
 
 // Exit codes (IMPLEMENTATION_PLAN §3).

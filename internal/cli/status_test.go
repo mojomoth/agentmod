@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agentmod/agentmod/internal/config"
+	"github.com/mojomoth/agentmod/internal/config"
 )
 
 // makeProject writes .agentmod/agentmod.toml with the given config under a

@@ -19,7 +19,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/agentmod/agentmod/internal/project"
+	"github.com/mojomoth/agentmod/internal/project"
 )
 
 // maxSymlinkTarget bounds how many bytes PlanRestore will read as a symlink

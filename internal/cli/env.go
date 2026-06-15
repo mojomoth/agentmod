@@ -8,9 +8,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/agentmod/agentmod/internal/config"
-	"github.com/agentmod/agentmod/internal/project"
-	"github.com/agentmod/agentmod/internal/routing"
+	"github.com/mojomoth/agentmod/internal/config"
+	"github.com/mojomoth/agentmod/internal/project"
+	"github.com/mojomoth/agentmod/internal/routing"
 )
 
 // envOptions carries the parsed `agentmod env` flags.

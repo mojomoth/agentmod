@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/agentmod/agentmod/internal/project"
+	"github.com/mojomoth/agentmod/internal/project"
 )
 
 // BackupPrefix is the project-root-relative name prefix of restore backups:

@@ -1,4 +1,4 @@
-module github.com/agentmod/agentmod
+module github.com/mojomoth/agentmod
 
 go 1.26
 

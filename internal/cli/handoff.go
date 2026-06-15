@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agentmod/agentmod/internal/handoff"
-	"github.com/agentmod/agentmod/internal/layout"
-	"github.com/agentmod/agentmod/internal/project"
+	"github.com/mojomoth/agentmod/internal/handoff"
+	"github.com/mojomoth/agentmod/internal/layout"
+	"github.com/mojomoth/agentmod/internal/project"
 )
 
 // runHandoff dispatches `agentmod handoff <subcommand>` (FABLE_PLAN §18).

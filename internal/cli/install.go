@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/agentmod/agentmod/internal/project"
+	"github.com/mojomoth/agentmod/internal/project"
 )
 
 // install gstack (FABLE_PLAN §16, IMPLEMENTATION_PLAN §10): clone gstack

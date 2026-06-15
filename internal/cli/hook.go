@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/agentmod/agentmod/internal/shellhook"
+	"github.com/mojomoth/agentmod/internal/shellhook"
 )
 
 // runHook implements `agentmod hook <shell>`: it prints the shell hook script

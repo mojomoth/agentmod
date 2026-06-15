@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agentmod/agentmod/internal/config"
-	"github.com/agentmod/agentmod/internal/routing"
+	"github.com/mojomoth/agentmod/internal/config"
+	"github.com/mojomoth/agentmod/internal/routing"
 )
 
 // shellCase abstracts the zsh/bash scripting differences. bash has no chpwd

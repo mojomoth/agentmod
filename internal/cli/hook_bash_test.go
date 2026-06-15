@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agentmod/agentmod/internal/config"
-	"github.com/agentmod/agentmod/internal/shellhook"
+	"github.com/mojomoth/agentmod/internal/config"
+	"github.com/mojomoth/agentmod/internal/shellhook"
 )
 
 func TestHookBashScriptContents(t *testing.T) {

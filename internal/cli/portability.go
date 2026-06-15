@@ -23,8 +23,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
-	"github.com/agentmod/agentmod/internal/layout"
-	"github.com/agentmod/agentmod/internal/project"
+	"github.com/mojomoth/agentmod/internal/layout"
+	"github.com/mojomoth/agentmod/internal/project"
 )
 
 // portabilityWarning is one machine-specific absolute path (or unscannable

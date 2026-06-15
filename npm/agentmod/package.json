@@ -1,0 +1,38 @@
+{
+  "name": "agentmod",
+  "version": "0.0.0",
+  "description": "Per-project isolation and handoff for coding agent environments (Claude Code, Codex CLI, OpenCode)",
+  "bin": {
+    "agentmod": "bin/agentmod.js"
+  },
+  "files": [
+    "bin/agentmod.js",
+    "README.md"
+  ],
+  "homepage": "https://github.com/mojomoth/agentmod",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mojomoth/agentmod.git"
+  },
+  "license": "MIT",
+  "keywords": [
+    "agentmod",
+    "claude-code",
+    "codex",
+    "opencode",
+    "cli",
+    "isolation",
+    "handoff"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "optionalDependencies": {
+    "@agentmod/cli-linux-x64": "0.0.0",
+    "@agentmod/cli-linux-arm64": "0.0.0",
+    "@agentmod/cli-darwin-x64": "0.0.0",
+    "@agentmod/cli-darwin-arm64": "0.0.0",
+    "@agentmod/cli-win32-x64": "0.0.0",
+    "@agentmod/cli-win32-arm64": "0.0.0"
+  }
+}

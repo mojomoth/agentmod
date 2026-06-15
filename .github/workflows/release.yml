@@ -1,0 +1,64 @@
+name: release
+
+# Publishes a release for every v* tag:
+#   GoReleaser -> GitHub Release assets + Homebrew formula + Scoop manifest
+#   npm        -> platform packages + the `agentmod` launcher package
+#
+# Required repository secrets (names only; values live in repo settings):
+#   GORELEASER_TOKEN  PAT with `repo` scope — needed because the Homebrew tap
+#                     and Scoop bucket are SEPARATE repos; the default
+#                     GITHUB_TOKEN only reaches this repo.
+#   NPM_TOKEN         npm automation token with publish rights.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          # PAT so GoReleaser can push to mojomoth/homebrew-tap and
+          # mojomoth/scoop-bucket in addition to creating this repo's release.
+          GITHUB_TOKEN: ${{ secrets.GORELEASER_TOKEN }}
+      - name: Upload dist for the npm job
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 1
+
+  npm-publish:
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Download GoReleaser binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Build and publish npm packages
+        run: node npm/build.mjs --publish
+        env:
+          AGENTMOD_VERSION: ${{ github.ref_name }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

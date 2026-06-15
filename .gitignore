@@ -2,6 +2,7 @@
 /agentmod
 /bin/
 /dist/
+npm/dist/
 *.test
 coverage.out
 

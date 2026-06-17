@@ -1,5 +1,7 @@
 # agentmod
 
+[한국어](README.ko.md) · [简体中文](README.zh-CN.md) · [正體中文](README.zh-TW.md) · [Français](README.fr.md) · [日本語](README.ja.md) · [Português](README.pt.md) · [Español](README.es.md) · [Română](README.ro.md) · [Русский](README.ru.md) · [Türkçe](README.tr.md) · [Italiano](README.it.md) · [Tiếng Việt](README.vi.md) · [Українська](README.uk.md) · [Indonesian](README.id.md) · [हिन्दी](README.hi.md) · [فارسی](README.fa.md) · [Беларуская](README.be.md) · [বাংলা](README.bn.md)
+
 Per-project isolation and handoff for coding agents.
 
 `agentmod` keeps the configuration, skills, plugins, sessions, caches, and
@@ -67,9 +69,6 @@ Routing per agent can be switched off in `agentmod.toml`
 Pick whichever fits your setup — each installs the same single binary:
 
 ```sh
-# Homebrew (macOS / Linux)
-brew install mojomoth/tap/agentmod
-
 # npm (installs the prebuilt binary for your platform)
 npm install -g agentmod
 
@@ -78,10 +77,6 @@ curl -fsSL https://raw.githubusercontent.com/mojomoth/agentmod/main/install.sh |
 
 # go install (requires the Go toolchain)
 go install github.com/mojomoth/agentmod@latest
-
-# Scoop (Windows)
-scoop bucket add mojomoth https://github.com/mojomoth/scoop-bucket
-scoop install agentmod
 ```
 
 Or build from source (Go 1.26+, the only module dependency is
